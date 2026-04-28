@@ -4,4 +4,4 @@
 
 所有的临时文件放在temp文件夹下。
 
-若开发新的agents/skill/tools，需要在config.example.yaml以及readme.md中添加对应的配置说明，明确这些是必须项。
+若开发新的或修改agents/skill/tools，需要在config.example.yaml以及readme.md中添加对应的配置说明，明确这些是必须项。

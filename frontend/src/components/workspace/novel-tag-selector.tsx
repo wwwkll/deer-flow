@@ -60,7 +60,7 @@ export function NovelTagSelector({
           className="w-full justify-between"
           disabled={disabled}
         >
-          {selectedTag || "选择进行中的小说（可选）"}
+          {selectedTag ?? "选择进行中的小说（可选）"}
           <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
         </Button>
       </DropdownMenuTrigger>

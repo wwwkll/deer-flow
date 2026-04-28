@@ -167,13 +167,9 @@ export function RecentChatList() {
   const { mutate: deleteThread } = useDeleteThread();
   const { mutate: renameThread } = useRenameThread();
 
-  const [threadTags, setThreadTags] = useState<
-    Record<string, string | undefined>
-  >({});
-  const [loadingTags, setLoadingTags] = useState(false);
+  const [threadTags, setThreadTags] = useState<Record<string, string | undefined>>({});
 
   const loadThreadTags = useCallback(async () => {
-    setLoadingTags(true);
     const tags: Record<string, string | undefined> = {};
 
     await Promise.all(
@@ -185,7 +181,7 @@ export function RecentChatList() {
           if (response.ok) {
             const data = await response.json();
             const novelTagVar = data.variables?.find(
-              (v: any) => v.key === "novel_tag",
+              (v: { key: string; value?: string }) => v.key === "novel_tag",
             );
             tags[thread.thread_id] = novelTagVar?.value;
           }
@@ -196,7 +192,6 @@ export function RecentChatList() {
     );
 
     setThreadTags(tags);
-    setLoadingTags(false);
   }, [threads]);
 
   useEffect(() => {
@@ -209,10 +204,8 @@ export function RecentChatList() {
     const groups: Record<string, AgentThread[]> = {};
 
     threads.forEach((thread) => {
-      const tag = threadTags[thread.thread_id] || "__undefined__";
-      if (!groups[tag]) {
-        groups[tag] = [];
-      }
+      const tag = threadTags[thread.thread_id] ?? "__undefined__";
+      groups[tag] ??= [];
       groups[tag].push(thread);
     });
 
@@ -344,7 +337,7 @@ export function RecentChatList() {
           <SidebarMenu>
             <div className="flex w-full flex-col gap-1">
               {sortedGroupKeys.map((groupKey) => {
-                const groupThreads = groupedThreads[groupKey];
+                const groupThreads = groupedThreads[groupKey] ?? [];
                 const isExpanded = expandedGroups.has(groupKey);
                 const groupName =
                   groupKey === "__undefined__" ? "未分类" : groupKey;
@@ -365,7 +358,7 @@ export function RecentChatList() {
                         ({groupThreads.length})
                       </span>
                     </button>
-                    {isExpanded && groupThreads && (
+                    {isExpanded && (
                       <div className="mt-1 ml-2">
                         {groupThreads.map((thread) => {
                           const isActive = pathOfThread(thread) === pathname;
