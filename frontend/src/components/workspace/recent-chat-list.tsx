@@ -167,7 +167,9 @@ export function RecentChatList() {
   const { mutate: deleteThread } = useDeleteThread();
   const { mutate: renameThread } = useRenameThread();
 
-  const [threadTags, setThreadTags] = useState<Record<string, string | undefined>>({});
+  const [threadTags, setThreadTags] = useState<
+    Record<string, string | undefined>
+  >({});
 
   const loadThreadTags = useCallback(async () => {
     const tags: Record<string, string | undefined> = {};
