@@ -527,8 +527,9 @@ checkpointer:
 # 主 Agent 通过 workflow 工具调用工作流。
 #
 # 内置工作流：
-#   - organize: 整理工作流（步骤1-4，包含并行整理）
-#   - writing:  写作工作流（写作-审核-后处理，最多审核2次）
+#   - organize:     整理工作流（步骤1-4，包含并行整理）
+#   - writing:      写作工作流（写作-审核-修改，最多审核2次）
+#   - post_process: 后处理工作流（摘要+状态+伏笔+名片+同步细纲）
 #
 # 工作流不是 Agent，也不是 Skill：
 #   - Agent: 独立 LLM 会话，LLM 自主决策
@@ -557,6 +558,7 @@ checkpointer:
 #   ├── registry.py         工作流注册表
 #   ├── executor.py         工作流执行引擎
 #   ├── helpers.py          辅助函数（调用子Agent）
-#   ├── novel_organize.py   整理工作流
-#   └── novel_writing.py    写作工作流
+#   ├── novel_organize.py      整理工作流
+#   ├── novel_writing.py       写作工作流
+#   └── novel_post_process.py  后处理工作流
 # ============================================================================

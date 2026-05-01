@@ -101,6 +101,21 @@ async def workflow_tool(
     params = _auto_detect_params(workflow_name, params, thread_id=thread_id)
     params["thread_id"] = thread_id
 
+    # Get the model name from runtime metadata (same as task_tool)
+    import logging
+    logger = logging.getLogger(__name__)
+    
+    metadata = runtime.config.get("metadata", {}) if runtime.config else {}
+    parent_model = metadata.get("model_name")
+    
+    # Debug logging
+    logger.info(f"[WORKFLOW_DEBUG] runtime.config: {runtime.config}")
+    logger.info(f"[WORKFLOW_DEBUG] metadata: {metadata}")
+    logger.info(f"[WORKFLOW_DEBUG] parent_model: {parent_model}")
+    
+    if parent_model:
+        params["model_name"] = parent_model
+
     writer = get_stream_writer()
     writer({"type": "workflow_started", "workflow_name": workflow_name, "description": description})
 

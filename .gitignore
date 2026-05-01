@@ -35,7 +35,11 @@ extensions_config.json
 # Coverage report
 coverage.xml
 coverage/
-.deer-flow/
+
+# DeerFlow runtime data (ignore all except agents)
+backend/.deer-flow/*
+!backend/.deer-flow/agents/
+!backend/.deer-flow/agents/**/
 .claude/
 skills/custom/*
 logs/

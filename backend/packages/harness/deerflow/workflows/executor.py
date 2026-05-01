@@ -63,7 +63,8 @@ class WorkflowExecutor:
             initial_state = self._build_initial_state(params)
 
             final_state = None
-            async for chunk in workflow.astream(initial_state, stream_mode="values"):
+            config = {"recursion_limit": 100}
+            async for chunk in workflow.astream(initial_state, stream_mode="values", config=config):
                 final_state = chunk
 
             if final_state is None:

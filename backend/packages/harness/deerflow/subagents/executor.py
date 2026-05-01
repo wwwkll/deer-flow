@@ -169,6 +169,7 @@ class SubagentExecutor:
     def _create_agent(self):
         """Create the agent instance."""
         model_name = _get_model_name(self.config, self.parent_model)
+        logger.info(f"[SUBAGENT_DEBUG] config.model: {self.config.model}, parent_model: {self.parent_model}, resolved model_name: {model_name}")
         model = create_chat_model(name=model_name, thinking_enabled=False)
 
         from deerflow.agents.middlewares.tool_error_handling_middleware import build_subagent_runtime_middlewares

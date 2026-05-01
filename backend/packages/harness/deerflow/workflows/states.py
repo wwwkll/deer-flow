@@ -10,8 +10,10 @@ def _keep_latest(old: str | None, new: str | None) -> str | None:
 
 class NovelWorkflowState(TypedDict, total=False):
     thread_id: str
+    model_name: str
     novel_name: str
     chapter_num: int
+    chapter_nums: list[int]
     chapter_group: str
     world_reference: str
     character_reference: str

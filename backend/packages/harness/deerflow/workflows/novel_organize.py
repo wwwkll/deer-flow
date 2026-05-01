@@ -50,6 +50,7 @@ async def organize_world(state: NovelWorkflowState) -> dict[str, Any]:
     chapter_num = state.get("chapter_num", 0)
     chapter_group = state.get("chapter_group", "")
     thread_id = state.get("thread_id")
+    model_name = state.get("model_name")
 
     logger.info(f"Organize workflow: organizing world reference for chapter {chapter_num}")
 
@@ -81,11 +82,12 @@ async def organize_world(state: NovelWorkflowState) -> dict[str, Any]:
 
 {sections}
 
-整理当前章节需要的世界观设定，写入：{output_path}
+根据章节细纲中的剧情，提取相关的世界观设定，整理成参考文档。
+将整理结果写入：{output_path}
 """
 
     try:
-        result = await call_subagent("novel-world-organizer", task)
+        result = await call_subagent("novel-world-organizer", task, parent_model=model_name)
         return {"world_reference": output_path}
     except Exception as e:
         logger.error(f"Organize world failed: {e}")
@@ -97,6 +99,7 @@ async def organize_characters(state: NovelWorkflowState) -> dict[str, Any]:
     chapter_num = state.get("chapter_num", 0)
     chapter_group = state.get("chapter_group", "")
     thread_id = state.get("thread_id")
+    model_name = state.get("model_name")
 
     logger.info(f"Organize workflow: organizing character reference for chapter {chapter_num}")
 
@@ -128,11 +131,12 @@ async def organize_characters(state: NovelWorkflowState) -> dict[str, Any]:
 
 {sections}
 
-整理当前章节出场的人物信息，写入：{output_path}
+根据章节细纲中的剧情，提取出场人物的详细信息，整理成参考文档。
+将整理结果写入：{output_path}
 """
 
     try:
-        result = await call_subagent("novel-character-organizer", task)
+        result = await call_subagent("novel-character-organizer", task, parent_model=model_name)
         return {"character_reference": output_path}
     except Exception as e:
         logger.error(f"Organize characters failed: {e}")
@@ -144,6 +148,7 @@ async def organize_items(state: NovelWorkflowState) -> dict[str, Any]:
     chapter_num = state.get("chapter_num", 0)
     chapter_group = state.get("chapter_group", "")
     thread_id = state.get("thread_id")
+    model_name = state.get("model_name")
 
     logger.info(f"Organize workflow: organizing item reference for chapter {chapter_num}")
 
@@ -179,7 +184,7 @@ async def organize_items(state: NovelWorkflowState) -> dict[str, Any]:
 """
 
     try:
-        result = await call_subagent("novel-item-organizer", task)
+        result = await call_subagent("novel-item-organizer", task, parent_model=model_name)
         return {"item_reference": output_path}
     except Exception as e:
         logger.error(f"Organize items failed: {e}")
@@ -190,6 +195,7 @@ async def organize_storyline(state: NovelWorkflowState) -> dict[str, Any]:
     chapter_num = state.get("chapter_num", 0)
     chapter_group = state.get("chapter_group", "")
     thread_id = state.get("thread_id")
+    model_name = state.get("model_name")
 
     logger.info(f"Organize workflow: organizing storyline reference for chapter {chapter_num}")
 
@@ -239,7 +245,7 @@ async def organize_storyline(state: NovelWorkflowState) -> dict[str, Any]:
 """
 
     try:
-        result = await call_subagent("novel-storyline-organizer", task)
+        result = await call_subagent("novel-storyline-organizer", task, parent_model=model_name)
         return {"storyline_reference": output_path}
     except Exception as e:
         logger.error(f"Organize storyline failed: {e}")
@@ -252,43 +258,68 @@ async def assemble_context(state: NovelWorkflowState) -> dict[str, Any]:
     chapter_group = state.get("chapter_group", "")
     thread_id = state.get("thread_id")
 
-    logger.info(f"Organize workflow: assembling context for chapter {chapter_num}")
+    logger.info(f"Organize workflow: assembling context for all chapter groups")
 
     novel_base = get_novel_base(thread_id=thread_id)
     if not novel_base:
         raise ValueError("无法获取小说根目录，请检查全局变量 novel_toc")
-    task_dir = f"{novel_base}/02-正文/{chapter_group}/_task"
 
-    sections = []
-    sections.append(f"# 写作任务汇总\n\n当前章节：第{chapter_num}章（本组：{chapter_group}）\n")
+    # Find all chapter group directories under 02-正文/
+    main_text_dir = Path(f"{novel_base}/02-正文")
+    if not main_text_dir.exists():
+        raise ValueError(f"正文目录不存在: {main_text_dir}")
 
-    ref_files = [
-        ("细纲", f"{novel_base}/01-规划/chapters/{chapter_group}-细纲.md"),
-        ("世界观参考", f"{task_dir}/世界观参考.md"),
-        ("人物参考", f"{task_dir}/人物参考.md"),
-        ("道具参考", f"{task_dir}/道具参考.md"),
-        ("故事线参考", f"{task_dir}/故事线参考.md"),
-        ("当前状态", f"{novel_base}/03-状态/当前状态卡.md"),
-        ("伏笔池", f"{novel_base}/03-状态/待办事项.md"),
-        ("章节摘要汇总", f"{novel_base}/03-状态/章节摘要汇总.md"),
-    ]
+    # Get all chapter group folders (directories starting with "第")
+    chapter_groups = sorted([
+        d.name for d in main_text_dir.iterdir()
+        if d.is_dir() and d.name.startswith("第")
+    ])
 
-    for label, path in ref_files:
-        try:
-            p = Path(path)
-            if p.exists():
-                content = p.read_text(encoding="utf-8")
-                sections.append(f"## {label}\n\n{content}\n")
-            else:
-                logger.warning(f"Reference file not found: {path}")
-        except Exception as e:
-            logger.warning(f"Failed to read {path}: {e}")
+    if not chapter_groups:
+        logger.warning(f"No chapter group folders found in {main_text_dir}")
+        return {"writing_task_summary": ""}
 
-    output_path = f"{task_dir}/写作任务汇总.md"
-    Path(output_path).write_text("\n".join(sections), encoding="utf-8")
-    logger.info(f"Assembled writing task summary: {output_path}")
+    summaries = []
 
-    return {"writing_task_summary": output_path}
+    for cg in chapter_groups:
+        task_dir = main_text_dir / cg / "_task"
+        if not task_dir.exists():
+            logger.warning(f"Task directory not found: {task_dir}")
+            continue
+
+        # Remove old summary file if exists (before collecting md_files)
+        summary_path = task_dir / "写作任务汇总.md"
+        if summary_path.exists():
+            try:
+                summary_path.unlink()
+                logger.info(f"Removed old summary: {summary_path}")
+            except Exception as e:
+                logger.warning(f"Failed to remove old summary {summary_path}: {e}")
+
+        # Find all .md files in _task directory (after removing old summary)
+        md_files = sorted(task_dir.glob("*.md"))
+        if not md_files:
+            logger.warning(f"No .md files found in {task_dir}")
+            continue
+
+        # Build sections from all .md files
+        sections = []
+        sections.append(f"# 写作任务汇总\n\n章节组：{cg}\n")
+
+        for md_file in md_files:
+            try:
+                content = md_file.read_text(encoding="utf-8")
+                sections.append(f"## {md_file.stem}\n\n{content}\n")
+            except Exception as e:
+                logger.warning(f"Failed to read {md_file}: {e}")
+
+        # Write new summary
+        output_path = task_dir / "写作任务汇总.md"
+        output_path.write_text("\n".join(sections), encoding="utf-8")
+        logger.info(f"Assembled writing task summary for {cg}: {output_path}")
+        summaries.append(str(output_path))
+
+    return {"writing_task_summary": "\n".join(summaries)}
 
 
 def create_organize_workflow() -> StateGraph:

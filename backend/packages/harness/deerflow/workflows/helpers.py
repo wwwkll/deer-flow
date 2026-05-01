@@ -29,9 +29,20 @@ def get_novel_base(thread_id: str | None = None) -> str | None:
         merged = get_merged_variables(thread_id=thread_id)
         novel_toc = merged.get("novel_toc")
         if isinstance(novel_toc, dict):
-            return novel_toc.get("value")
-        if novel_toc:
-            return str(novel_toc)
+            novel_base = novel_toc.get("value")
+        elif novel_toc:
+            novel_base = str(novel_toc)
+        else:
+            return None
+
+        # Convert container virtual path to host path
+        # /mnt/shared-data/... -> backend/.deer-flow/shared-data/...
+        if novel_base and novel_base.startswith("/mnt/shared-data/"):
+            from deerflow.config.paths import get_paths
+            relative = novel_base[len("/mnt/shared-data/"):].lstrip("/")
+            novel_base = str(get_paths().base_dir / "shared-data" / relative)
+
+        return novel_base
     except Exception as e:
         logger.warning(f"Failed to get novel_toc from global variables: {e}")
     return None
@@ -65,6 +76,7 @@ async def call_subagent(
 ) -> str:
     from deerflow.subagents import SubagentExecutor, get_subagent_config
     from deerflow.tools import get_available_tools
+    from deerflow.config import get_app_config
 
     config = get_subagent_config(subagent_name)
     if config is None:
@@ -72,6 +84,15 @@ async def call_subagent(
 
     config.skills = []
 
+    # Use default model if parent_model not specified
+    logger.info(f"[CALL_SUBAGENT_DEBUG] parent_model before fallback: {parent_model}")
+    if parent_model is None:
+        app_config = get_app_config()
+        if app_config.models:
+            parent_model = app_config.models[0].name
+            logger.info(f"[CALL_SUBAGENT_DEBUG] Using fallback model: {parent_model}")
+
+    logger.info(f"[CALL_SUBAGENT_DEBUG] Final parent_model: {parent_model}")
     tools = get_available_tools(model_name=parent_model, subagent_enabled=False)
 
     executor = SubagentExecutor(
