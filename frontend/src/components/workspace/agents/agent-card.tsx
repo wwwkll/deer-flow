@@ -23,9 +23,12 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import { useAgentFavorites } from "@/core/agent-favorites/hooks";
 import { useDeleteAgent } from "@/core/agents";
 import type { Agent } from "@/core/agents";
 import { useI18n } from "@/core/i18n/hooks";
+
+import { FavoriteButton } from "./favorite-button";
 
 interface AgentCardProps {
   agent: Agent;
@@ -36,6 +39,8 @@ export function AgentCard({ agent }: AgentCardProps) {
   const router = useRouter();
   const deleteAgent = useDeleteAgent();
   const [deleteOpen, setDeleteOpen] = useState(false);
+  const { data: favorites = [] } = useAgentFavorites();
+  const isFavorited = favorites.includes(agent.name);
 
   function handleChat() {
     router.push(`/workspace/agents/${agent.name}/chats/new`);
@@ -110,6 +115,7 @@ export function AgentCard({ agent }: AgentCardProps) {
             {t.agents.chat}
           </Button>
           <div className="flex gap-1">
+            <FavoriteButton agentName={agent.name} isFavorited={isFavorited} />
             <Button
               size="icon"
               variant="ghost"

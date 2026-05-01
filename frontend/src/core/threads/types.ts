@@ -17,7 +17,7 @@ export interface AgentThreadContext extends Record<string, unknown> {
   subagent_enabled: boolean;
   reasoning_effort?: "minimal" | "low" | "medium" | "high";
   agent_name?: string;
-  novel_tag?: string;
+  novel_toc?: string; // Novel table of contents path (e.g., "/mnt/shared-data/novels/book/小说A")
 }
 
 export interface AgentThread extends Thread<AgentThreadState> {

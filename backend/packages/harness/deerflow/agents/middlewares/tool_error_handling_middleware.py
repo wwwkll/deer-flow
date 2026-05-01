@@ -136,8 +136,12 @@ def build_lead_runtime_middlewares(*, lazy_init: bool = True) -> list[AgentMiddl
 
 def build_subagent_runtime_middlewares(*, lazy_init: bool = True) -> list[AgentMiddleware]:
     """Middlewares shared by subagent runtime before subagent-only middlewares."""
-    return _build_runtime_middlewares(
+    chain = _build_runtime_middlewares(
         include_uploads=False,
         include_dangling_tool_call_patch=True,
         lazy_init=lazy_init,
     )
+    from deerflow.agents.middlewares.global_variables_middleware import GlobalVariablesMiddleware
+
+    chain.append(GlobalVariablesMiddleware())
+    return chain

@@ -490,6 +490,46 @@ def test_skill_rescue_only_preserves_skill_calls_with_matched_tool_results() -> 
     assert not any(isinstance(m, ToolMessage) and getattr(m, "tool_call_id", None) == "skill-2" for m in preserved)
 
 
+def test_summarization_skipped_when_model_returns_error_summary(caplog: pytest.LogCaptureFixture) -> None:
+    model = MagicMock()
+    model.invoke.return_value = SimpleNamespace(text="Error generating summary: No generations found in stream.")
+    middleware = DeerFlowSummarizationMiddleware(
+        model=model,
+        trigger=("messages", 4),
+        keep=("messages", 2),
+        token_counter=len,
+    )
+
+    with caplog.at_level("WARNING"):
+        result = middleware.before_model({"messages": _messages()}, _runtime())
+
+    assert result is None
+    assert "Summarization failed" in caplog.text
+    assert "skipping to preserve conversation history" in caplog.text
+
+
+@pytest.mark.anyio
+async def test_async_summarization_skipped_when_model_returns_error_summary(caplog: pytest.LogCaptureFixture) -> None:
+    model = MagicMock()
+
+    async def _afail(*args, **kwargs):
+        return SimpleNamespace(text="Error generating summary: No generations found in stream.")
+
+    model.ainvoke = _afail
+    middleware = DeerFlowSummarizationMiddleware(
+        model=model,
+        trigger=("messages", 4),
+        keep=("messages", 2),
+        token_counter=len,
+    )
+
+    with caplog.at_level("WARNING"):
+        result = await middleware.abefore_model({"messages": _messages()}, _runtime())
+
+    assert result is None
+    assert "Summarization failed" in caplog.text
+
+
 def test_memory_flush_hook_preserves_agent_scoped_memory(monkeypatch: pytest.MonkeyPatch) -> None:
     queue = MagicMock()
     monkeypatch.setattr("deerflow.agents.memory.summarization_hook.get_memory_config", lambda: MemoryConfig(enabled=True))

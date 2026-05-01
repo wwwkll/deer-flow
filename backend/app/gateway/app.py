@@ -8,6 +8,7 @@ from fastapi import FastAPI
 from app.gateway.config import get_gateway_config
 from app.gateway.deps import langgraph_runtime
 from app.gateway.routers import (
+    agent_favorites,
     agents,
     artifacts,
     assistants_compat,
@@ -178,6 +179,10 @@ This gateway provides custom endpoints for models, MCP configuration, skills, an
                 "description": "Manage global and thread-level variables for dynamic prompt injection",
             },
             {
+                "name": "agent-favorites",
+                "description": "Manage agent favorites for quick access",
+            },
+            {
                 "name": "novel-tags",
                 "description": "Query available novel tags from workspace/book directories",
             },
@@ -238,6 +243,9 @@ This gateway provides custom endpoints for models, MCP configuration, skills, an
 
     # Novel Tags API is mounted at /api/novel-tags
     app.include_router(novel_tags.router)
+
+    # Agent Favorites API is mounted at /api/agent-favorites
+    app.include_router(agent_favorites.router)
 
     @app.get("/health", tags=["health"])
     async def health_check() -> dict:

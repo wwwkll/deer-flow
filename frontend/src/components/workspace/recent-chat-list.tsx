@@ -45,7 +45,6 @@ import {
   SidebarMenuItem,
 } from "@/components/ui/sidebar";
 import { getAPIClient } from "@/core/api";
-import { getBackendBaseURL } from "@/core/config";
 import { useI18n } from "@/core/i18n/hooks";
 import {
   exportThreadAsJSON,
@@ -172,35 +171,26 @@ export function RecentChatList() {
   >({});
 
   const loadThreadTags = useCallback(async () => {
-    const tags: Record<string, string | undefined> = {};
-
-    await Promise.all(
-      threads.map(async (thread) => {
-        try {
-          const response = await fetch(
-            `${getBackendBaseURL()}/api/global-variables/threads/${thread.thread_id}`,
-          );
-          if (response.ok) {
-            const data = await response.json();
-            const novelTagVar = data.variables?.find(
-              (v: { key: string; value?: string }) => v.key === "novel_tag",
-            );
-            tags[thread.thread_id] = novelTagVar?.value;
-          }
-        } catch {
-          // Ignore errors
+    try {
+      const response = await fetch("/api/global-variables/thread-novel-tocs");
+      if (!response.ok) return;
+      const data: Record<string, string> = await response.json();
+      const tags: Record<string, string | undefined> = {};
+      for (const [threadId, tocValue] of Object.entries(data)) {
+        if (tocValue) {
+          const segments = tocValue.split("/").filter(Boolean);
+          tags[threadId] = segments[segments.length - 1];
         }
-      }),
-    );
-
-    setThreadTags(tags);
-  }, [threads]);
+      }
+      setThreadTags(tags);
+    } catch {
+      // Ignore errors
+    }
+  }, []);
 
   useEffect(() => {
-    if (threads.length > 0) {
-      void loadThreadTags();
-    }
-  }, [threads, loadThreadTags]);
+    void loadThreadTags();
+  }, [loadThreadTags]);
 
   const groupedThreads = useMemo(() => {
     const groups: Record<string, AgentThread[]> = {};

@@ -60,7 +60,7 @@ import {
 import { getBackendBaseURL } from "@/core/config";
 import { useI18n } from "@/core/i18n/hooks";
 import { useModels } from "@/core/models/hooks";
-import { useNovelTags } from "@/core/novel-tags/hooks";
+import { useNovelTags, useThreadNovelToc } from "@/core/novel-tags/hooks";
 import type { AgentThreadContext } from "@/core/threads";
 import { textOfMessage } from "@/core/threads/utils";
 import type {
@@ -169,7 +169,47 @@ export function InputBox({
   const { thread, isMock } = useThread();
   const { textInput } = usePromptInputController();
   const promptRootRef = useRef<HTMLDivElement | null>(null);
-  const { data: novelTagsData, isLoading: isLoadingTags } = useNovelTags();
+  const {
+    data: novelTagsData,
+    isLoading: isLoadingTags,
+    error: novelTagsError,
+  } = useNovelTags();
+  const { data: threadNovelToc, isLoading: tocLoading } = useThreadNovelToc(
+    threadId,
+    isNewThread ?? false,
+  );
+  const [localNovelSaved, setLocalNovelSaved] = useState<string | undefined>(
+    undefined,
+  );
+
+  const novelLocked =
+    localNovelSaved !== undefined ||
+    (!isNewThread && !tocLoading && threadNovelToc !== undefined);
+  const lockedNovelValue = localNovelSaved ?? threadNovelToc;
+  const showNovelSelector =
+    (isNewThread ?? false) || !tocLoading || localNovelSaved !== undefined;
+
+  const handleNovelChange = useCallback(
+    (tag: string | undefined) => {
+      if (tag) {
+        setLocalNovelSaved(tag);
+        void fetch(
+          `${getBackendBaseURL()}/api/global-variables/threads/${threadId}/novel_toc`,
+          {
+            method: "PUT",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              value: tag,
+              description: "当前正在进行的小说目录",
+              is_system: false,
+              llm_editable: false,
+            }),
+          },
+        ).catch(() => ({}));
+      }
+    },
+    [threadId],
+  );
 
   const [followups, setFollowups] = useState<string[]>([]);
   const [followupsHidden, setFollowupsHidden] = useState(false);
@@ -479,6 +519,18 @@ export function InputBox({
           </div>
         </div>
       )}
+      {showNovelSelector && (
+        <div className="relative z-50 px-1 pb-1">
+          <NovelTagSelector
+            value={lockedNovelValue}
+            onChange={handleNovelChange}
+            tags={novelTagsData?.tags ?? []}
+            locked={novelLocked}
+            isLoading={isLoadingTags || tocLoading}
+            error={novelTagsError}
+          />
+        </div>
+      )}
       <PromptInput
         className={cn(
           "bg-background/85 rounded-2xl backdrop-blur-sm transition-all duration-300 ease-out *:data-[slot='input-group']:rounded-2xl",
@@ -495,18 +547,6 @@ export function InputBox({
             <div className="absolute right-0 bottom-0 left-0 flex items-center justify-center">
               {extraHeader}
             </div>
-          </div>
-        )}
-        {isNewThread && (
-          <div className="px-4 pt-3 pb-2">
-            <NovelTagSelector
-              value={context.novel_tag as string | undefined}
-              onChange={(tag) =>
-                onContextChange?.({ ...context, novel_tag: tag })
-              }
-              tags={novelTagsData?.tags ?? []}
-              disabled={isLoadingTags}
-            />
           </div>
         )}
         <PromptInputAttachments>
@@ -826,7 +866,7 @@ export function InputBox({
                 type="button"
                 onClick={() => {
                   if (monitorState.enabled) {
-                    onStopMonitor?.();
+                    onMonitorOpen?.();
                   } else if (monitorState.dialogOpen) {
                     onMonitorClose?.();
                   } else {
@@ -839,7 +879,7 @@ export function InputBox({
                     ? "bg-emerald-500/15 text-emerald-600 dark:text-emerald-400"
                     : "text-muted-foreground hover:bg-accent",
                 )}
-                title={monitorState.enabled ? "停止监控" : "开启监控"}
+                title={monitorState.enabled ? "查看监控状态" : "开启监控"}
               >
                 {monitorState.enabled ? (
                   <SatelliteIcon className="size-3.5 animate-pulse" />
@@ -849,6 +889,29 @@ export function InputBox({
                 <span className="hidden sm:inline">
                   {monitorState.enabled ? "监控中" : "监控"}
                 </span>
+                {monitorState.enabled &&
+                  monitorState.targetChapters > 0 &&
+                  (() => {
+                    const target = monitorState.targetChapters;
+                    const start = Math.max(1, target - 4);
+                    let found = 0;
+                    for (let ch = start; ch <= target; ch++) {
+                      if (monitorState.detectedChapters.includes(ch)) found++;
+                    }
+                    const total = Math.min(5, target);
+                    return (
+                      <span
+                        className={cn(
+                          "ml-0.5 font-mono",
+                          found >= total
+                            ? "text-emerald-600 dark:text-emerald-400"
+                            : "text-amber-600 dark:text-amber-400",
+                        )}
+                      >
+                        {found}/{total}
+                      </span>
+                    );
+                  })()}
               </button>
             )}
           </PromptInputTools>
@@ -936,64 +999,178 @@ export function InputBox({
       <Dialog
         open={monitorState?.dialogOpen ?? false}
         onOpenChange={(open) => {
-          open ? onMonitorOpen?.() : onMonitorClose?.();
+          if (open) {
+            onMonitorOpen?.();
+          } else {
+            onMonitorClose?.();
+          }
         }}
       >
         <DialogContent className="sm:max-w-sm">
           <DialogHeader>
-            <DialogTitle>监控配置</DialogTitle>
-            <DialogDescription>设置自动续传的空闲超时时间</DialogDescription>
+            <DialogTitle>
+              {monitorState?.enabled ? "监控状态" : "监控配置"}
+            </DialogTitle>
+            <DialogDescription>
+              {monitorState?.enabled
+                ? "自动续传监控正在运行"
+                : "设置自动续传的空闲超时时间"}
+            </DialogDescription>
           </DialogHeader>
           <div className="space-y-4 py-2">
-            <div>
-              <label className="text-sm font-medium">
-                空闲超时时间（分钟）
-              </label>
-              <input
-                type="number"
-                min={1}
-                max={60}
-                defaultValue={monitorState?.config.idleTimeoutMinutes ?? 10}
-                className="border-input focus-visible:ring-ring mt-1.5 flex h-9 w-full rounded-md border bg-transparent px-3 py-1 text-sm shadow-xs transition-colors focus-visible:ring-1 focus-visible:outline-none"
-                onChange={(e) => {
-                  const value = parseInt(e.target.value, 10);
-                  if (value >= 1 && value <= 60) {
-                    onMonitorConfigChange?.({ idleTimeoutMinutes: value });
-                  }
-                }}
-              />
-              <p className="text-muted-foreground mt-1 text-xs">
-                建议 5-30 分钟，默认 10 分钟
-              </p>
-            </div>
+            {/* Validation error message */}
+            {monitorState?.validationError && !monitorState.enabled && (
+              <div className="rounded-md border border-red-500/20 bg-red-500/10 px-3 py-2 text-xs text-red-600 dark:text-red-400">
+                {monitorState.validationError}
+              </div>
+            )}
+
+            {/* Idle timeout - only shown when not monitoring */}
+            {!monitorState?.enabled && (
+              <div>
+                <label className="text-sm font-medium">
+                  空闲超时时间（分钟）
+                </label>
+                <input
+                  type="number"
+                  min={1}
+                  max={60}
+                  defaultValue={monitorState?.config.idleTimeoutMinutes ?? 10}
+                  className="border-input focus-visible:ring-ring mt-1.5 flex h-9 w-full rounded-md border bg-transparent px-3 py-1 text-sm shadow-xs transition-colors focus-visible:ring-1 focus-visible:outline-none"
+                  onChange={(e) => {
+                    const value = parseInt(e.target.value, 10);
+                    if (value >= 1 && value <= 60) {
+                      onMonitorConfigChange?.({ idleTimeoutMinutes: value });
+                    }
+                  }}
+                />
+                <p className="text-muted-foreground mt-1 text-xs">
+                  建议 5-30 分钟，默认 10 分钟
+                </p>
+              </div>
+            )}
+
             <div>
               <label className="text-sm font-medium">续传消息</label>
               <div className="text-muted-foreground bg-muted mt-1 rounded-md px-3 py-2 text-xs">
-                &ldquo;请继续写第 N 章，一直写到第 M 章&rdquo;
+                告知 LLM
+                正在被监控，要求严格按照计划逐章执行，并说明判断条件和文件名规范
               </div>
             </div>
             <div>
               <label className="text-sm font-medium">监控条件</label>
               <div className="text-muted-foreground mt-1 text-xs">
-                target_chapters &gt; current_chapter
+                扫描 02-正文 目录下的章节文件
                 <br />
-                （当目标章节 &gt; 当前章节时生效）
+                （目标章节附近至少识别到 5 个章节文件时停止）
               </div>
             </div>
+
+            {/* Live status - only shown when monitoring */}
+            {monitorState?.enabled && monitorState.cardPath && (
+              <div className="space-y-2 border-t pt-3">
+                <label className="text-sm font-medium">实时状态</label>
+                <div className="space-y-1">
+                  <div className="flex justify-between text-xs">
+                    <span className="text-muted-foreground">card.json</span>
+                    <span
+                      className="text-foreground max-w-[200px] truncate text-right font-mono"
+                      title={monitorState.cardPath}
+                    >
+                      {monitorState.cardPath}
+                    </span>
+                  </div>
+                  <div className="flex justify-between text-xs">
+                    <span className="text-muted-foreground">目标章节</span>
+                    <span className="text-foreground">
+                      {monitorState.targetChapters}
+                    </span>
+                  </div>
+                  <div className="flex justify-between text-xs">
+                    <span className="text-muted-foreground">最近五章识别</span>
+                    <span className="text-foreground font-mono">
+                      {(() => {
+                        const target = monitorState.targetChapters;
+                        if (!target) return "-";
+                        const start = Math.max(1, target - 4);
+                        const chapters: React.ReactNode[] = [];
+                        for (let ch = start; ch <= target; ch++) {
+                          const found =
+                            monitorState.detectedChapters.includes(ch);
+                          chapters.push(
+                            <span
+                              key={ch}
+                              className={
+                                found
+                                  ? "text-emerald-600 dark:text-emerald-400"
+                                  : "text-muted-foreground/50"
+                              }
+                            >
+                              {ch}
+                            </span>,
+                          );
+                          if (ch < target)
+                            chapters.push(<span key={`s${ch}`}> </span>);
+                        }
+                        return chapters;
+                      })()}
+                    </span>
+                  </div>
+                  <div className="flex justify-between text-xs">
+                    <span className="text-muted-foreground">已完成</span>
+                    <span className="text-foreground">
+                      {(() => {
+                        const target = monitorState.targetChapters;
+                        if (!target) return "0 / 0";
+                        const start = Math.max(1, target - 4);
+                        let found = 0;
+                        for (let ch = start; ch <= target; ch++) {
+                          if (monitorState.detectedChapters.includes(ch))
+                            found++;
+                        }
+                        return `${found} / 5`;
+                      })()}
+                    </span>
+                  </div>
+                </div>
+              </div>
+            )}
           </div>
           <DialogFooter>
-            <Button variant="outline" onClick={() => onMonitorClose?.()}>
-              取消
-            </Button>
-            <Button
-              className="bg-emerald-600 text-white hover:bg-emerald-700"
-              onClick={() => {
-                onMonitorClose?.();
-                onStartMonitor?.();
-              }}
-            >
-              开始监控
-            </Button>
+            {monitorState?.enabled ? (
+              <>
+                <Button variant="outline" onClick={() => onMonitorClose?.()}>
+                  关闭
+                </Button>
+                <Button
+                  variant="destructive"
+                  onClick={() => {
+                    onMonitorClose?.();
+                    onStopMonitor?.();
+                  }}
+                >
+                  停止监控
+                </Button>
+              </>
+            ) : (
+              <>
+                <Button variant="outline" onClick={() => onMonitorClose?.()}>
+                  取消
+                </Button>
+                <Button
+                  className="bg-emerald-600 text-white hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-50"
+                  disabled={
+                    !monitorState?.novelTocSet || !monitorState?.cardJsonExists
+                  }
+                  onClick={() => {
+                    onMonitorClose?.();
+                    onStartMonitor?.();
+                  }}
+                >
+                  开始监控
+                </Button>
+              </>
+            )}
           </DialogFooter>
         </DialogContent>
       </Dialog>

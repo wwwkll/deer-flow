@@ -51,6 +51,15 @@ async def get_project_variables() -> VariablesListResponse:
 
 
 @router.get(
+    "/thread-novel-tocs",
+    summary="Get All Thread Novel TOCs",
+    description="Batch retrieve novel_toc values for all threads. Returns a mapping of thread_id to novel_toc path.",
+)
+async def get_thread_novel_tocs() -> dict[str, str]:
+    return get_storage().load_novel_tocs()
+
+
+@router.get(
     "/threads/{thread_id}",
     response_model=VariablesListResponse,
     summary="Get Thread-Level Variables",

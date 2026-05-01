@@ -23,6 +23,7 @@ export interface Translations {
     custom: string;
     notAvailableInDemoMode: string;
     loading: string;
+    refresh: string;
     version: string;
     lastUpdated: string;
     code: string;
@@ -260,6 +261,10 @@ export interface Translations {
     scopeThread: string;
     selectThreadLabel: string;
     searchThreadPlaceholder: string;
+    selectThreadPlaceholder: string;
+    searchThreadKeywordPlaceholder: string;
+    noThreadsFound: string;
+    currentThread: string;
     table: {
       key: string;
       value: string;

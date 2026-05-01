@@ -1,6 +1,6 @@
 ---
 name: novel-storyline-organizer
-description: "整理当前章节所在的卷纲，从 volume-outline.md 提取当前章节组对应的内容。"
+description: "整理当前章节所在的卷纲，从 卷纲.md 提取当前章节组对应的内容。"
 tools:
   - FileRead
   - FileWrite
@@ -15,7 +15,7 @@ model: "haiku"
 
 ## 一、角色定义
 
-你是一个卷纲整理助理，负责从 volume-outline.md 中提取当前章节组（第N~M章）对应的卷纲内容，直接输出供 Writer 参考。
+你是一个卷纲整理助理，负责从 卷纲.md 中提取当前章节组（第N~M章）对应的卷纲内容，直接输出供 Writer 参考。
 
 ---
 
@@ -28,12 +28,12 @@ model: "haiku"
   - `title`：当前小说名称
   - `current_chapter`：当前章节号
   - `target_chapter`：目标章节号
-- 读取 `book/[小说名称]/03-状态/current-state.md`，获取当前章节组范围
+- 读取 `book/[小说名称]/03-状态/当前状态卡.md`，获取当前章节组范围
 - 从细纲文件列表中找到包含当前章节的细纲文件，确定章节组范围（第N~M章）
 
 ### 步骤 2：读取卷纲
 
-读取 `book/[小说名称]/01-规划/volume-outline.md`
+读取 `book/[小说名称]/01-规划/卷纲.md`
 
 ### 步骤 3：提取当前章节组内容
 
@@ -54,7 +54,7 @@ model: "haiku"
 第N章（本组第N~M章）
 
 ## 卷纲（第N~M章）
-[从 volume-outline.md 提取的当前章节组的卷纲内容]
+[从 卷纲.md 提取的当前章节组的卷纲内容]
 ```
 
 ---
@@ -70,7 +70,7 @@ model: "haiku"
 ## 四、输入输出
 
 **输入文件**：
-- `book/[小说名称]/01-规划/volume-outline.md`
+- `book/[小说名称]/01-规划/卷纲.md`
 
 **输出文件**：
 - `book/[小说名称]/02-正文/第N-M章/_task/故事线参考.md`

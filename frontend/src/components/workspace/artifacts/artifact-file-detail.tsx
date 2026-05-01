@@ -1,4 +1,5 @@
 import {
+  ArrowLeftIcon,
   Code2Icon,
   CopyIcon,
   DownloadIcon,
@@ -67,8 +68,14 @@ export function ArtifactFileDetail({
   threadId: string;
 }) {
   const { t } = useI18n();
-  const { artifacts, setOpen, select, directoryEntries, setDirectoryEntries } =
-    useArtifacts();
+  const {
+    artifacts,
+    setOpen,
+    select,
+    backToList,
+    directoryEntries,
+    setDirectoryEntries,
+  } = useArtifacts();
 
   const isWorkspaceFile = useMemo(() => {
     return filepathFromProps.startsWith("workspace:");
@@ -118,6 +125,12 @@ export function ArtifactFileDetail({
   const [workspaceContent, setWorkspaceContent] = useState<string | null>(null);
   const [isLoadingWorkspaceContent, setIsLoadingWorkspaceContent] =
     useState(false);
+
+  useEffect(() => {
+    setWorkspaceContent(null);
+    setIsEditing(false);
+    setEditContent("");
+  }, [filepath]);
 
   useEffect(() => {
     if (isWorkspaceFile && !workspaceContent) {
@@ -254,6 +267,18 @@ export function ArtifactFileDetail({
     <Artifact className={cn(className)}>
       <ArtifactHeader className="px-2">
         <div className="flex items-center gap-2">
+          {isWorkspaceFile && (
+            <Tooltip content="Back to file list">
+              <Button
+                variant="ghost"
+                size="icon"
+                className="size-7 shrink-0"
+                onClick={backToList}
+              >
+                <ArrowLeftIcon className="h-4 w-4" />
+              </Button>
+            </Tooltip>
+          )}
           <ArtifactTitle>
             {isWriteFile || isWorkspaceFile ? (
               <div className="px-2">{getFileName(filepath)}</div>

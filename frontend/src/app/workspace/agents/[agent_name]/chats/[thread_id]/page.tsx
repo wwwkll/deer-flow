@@ -2,7 +2,7 @@
 
 import { BotIcon, PlusSquare } from "lucide-react";
 import { useParams, useRouter } from "next/navigation";
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 import type { PromptInputMessage } from "@/components/ai-elements/prompt-input";
 import { Button } from "@/components/ui/button";
@@ -22,6 +22,7 @@ import { TodoList } from "@/components/workspace/todo-list";
 import { TokenUsageIndicator } from "@/components/workspace/token-usage-indicator";
 import { Tooltip } from "@/components/workspace/tooltip";
 import { useAgent } from "@/core/agents";
+import { fetchThreadVariables } from "@/core/global-variables/api";
 import { useI18n } from "@/core/i18n/hooks";
 import { useModels } from "@/core/models/hooks";
 import { useNotification } from "@/core/notification/hooks";
@@ -29,6 +30,7 @@ import { useThreadSettings } from "@/core/settings";
 import { useThreadStream } from "@/core/threads/hooks";
 import { textOfMessage } from "@/core/threads/utils";
 import { env } from "@/env";
+import { useAutoResumeMonitor } from "@/hooks/use-auto-resume-monitor";
 import { cn } from "@/lib/utils";
 
 export default function AgentChatPage() {
@@ -94,6 +96,45 @@ export default function AgentChatPage() {
     ? MESSAGE_LIST_DEFAULT_PADDING_BOTTOM +
       MESSAGE_LIST_FOLLOWUPS_EXTRA_PADDING_BOTTOM
     : undefined;
+
+  // -- Fetch novel_toc --
+  const novelTocRef = useRef<string | null>(null);
+  const [novelToc, setNovelToc] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!threadId) return;
+    fetchThreadVariables(threadId)
+      .then((data) => {
+        const tocVar = data.variables.find((v) => v.key === "novel_toc");
+        const toc = tocVar?.value ?? null;
+        novelTocRef.current = toc;
+        setNovelToc(toc);
+      })
+      .catch(() => {
+        novelTocRef.current = null;
+        setNovelToc(null);
+      });
+  }, [threadId]);
+
+  // -- Auto resume monitor --
+  const {
+    monitorState,
+    openDialog: openMonitorDialog,
+    closeDialog: closeMonitorDialog,
+    updateConfig: updateMonitorConfig,
+    startMonitor,
+    stopMonitor,
+  } = useAutoResumeMonitor(
+    isNewThread ? undefined : threadId,
+    novelToc,
+    () => thread.isLoading,
+    useCallback(
+      async (msg: string) => {
+        await sendMessage(threadId, { text: msg, files: [] });
+      },
+      [sendMessage, threadId],
+    ),
+  );
 
   return (
     <ThreadContext.Provider value={{ thread }}>
@@ -195,6 +236,12 @@ export default function AgentChatPage() {
                   onFollowupsVisibilityChange={setShowFollowups}
                   onSubmit={handleSubmit}
                   onStop={handleStop}
+                  monitorState={monitorState}
+                  onMonitorOpen={openMonitorDialog}
+                  onMonitorClose={closeMonitorDialog}
+                  onMonitorConfigChange={updateMonitorConfig}
+                  onStartMonitor={startMonitor}
+                  onStopMonitor={stopMonitor}
                 />
                 {env.NEXT_PUBLIC_STATIC_WEBSITE_ONLY === "true" && (
                   <div className="text-muted-foreground/67 w-full translate-y-12 text-center text-xs">

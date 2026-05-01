@@ -7,11 +7,11 @@ from pathlib import Path
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
-from app.gateway.path_utils import resolve_thread_virtual_path
+from app.gateway.path_utils import resolve_any_virtual_path
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter(tags=["filesystem"])
+router = APIRouter(prefix="/api", tags=["filesystem"])
 
 # Supported file extensions for browsing
 SUPPORTED_EXTENSIONS = {".md", ".txt", ".json", ".log"}
@@ -91,7 +91,7 @@ async def browse_directory(
         Directory contents with folders and filtered files.
     """
     try:
-        actual_path = resolve_thread_virtual_path(thread_id, path)
+        actual_path = resolve_any_virtual_path(thread_id, path)
 
         if not actual_path.exists():
             raise HTTPException(status_code=404, detail=f"Directory not found: {path}")
@@ -167,7 +167,7 @@ async def read_file(thread_id: str, path: str):
         File content and metadata.
     """
     try:
-        actual_path = resolve_thread_virtual_path(thread_id, path)
+        actual_path = resolve_any_virtual_path(thread_id, path)
 
         if not actual_path.exists():
             raise HTTPException(status_code=404, detail=f"File not found: {path}")
@@ -212,7 +212,7 @@ async def write_file(thread_id: str, request: WriteRequest):
         Success status and file metadata.
     """
     try:
-        actual_path = resolve_thread_virtual_path(thread_id, request.path)
+        actual_path = resolve_any_virtual_path(thread_id, request.path)
 
         if actual_path.is_dir():
             raise HTTPException(status_code=400, detail=f"Path is a directory: {request.path}")
@@ -252,7 +252,7 @@ async def delete_file(thread_id: str, path: str):
         Success status.
     """
     try:
-        actual_path = resolve_thread_virtual_path(thread_id, path)
+        actual_path = resolve_any_virtual_path(thread_id, path)
 
         if not actual_path.exists():
             raise HTTPException(status_code=404, detail=f"File not found: {path}")

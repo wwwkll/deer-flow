@@ -85,7 +85,7 @@ DeerFlow 是一个开源的 super agent harness，本项目在其基础上二开
 | 规划类 | novel-architect | 新建小说时生成完整基础设定 |
 | | volume-planner | 编写/修改全书卷纲 |
 | | outline-planner | 编写/修改章节细纲（每 5 章一组） |
-| | book-rules-manager | 管理 book-rules.json 写作规则 |
+| | book-rules-manager | 管理 本书规则.json 写作规则 |
 | 整理类 | novel-world-organizer | 整理当前章节需要的世界观设定 |
 | | novel-character-organizer | 整理当前章节出场的人物信息 |
 | | novel-item-organizer | 整理当前章节出场的道具和技能 |
@@ -114,29 +114,57 @@ DeerFlow 是一个开源的 super agent harness，本项目在其基础上二开
 | novel-anti-ai-detector | AI 痕迹检测与消除技能 | [skills/custom/novel-anti-ai-detector/](skills/custom/novel-anti-ai-detector/) |
 | novel-plan-compliance | 规划合规检查技能 | [skills/custom/novel-plan-compliance/](skills/custom/novel-plan-compliance/) |
 
+### 工作流 (Workflow)
+
+工作流是确定性的任务编排，不依赖 LLM 决策，保证流程完整执行。与 Agent/Skill 的区别：
+
+| 概念 | 本质 | 执行方式 |
+|------|------|----------|
+| Agent | 独立 LLM 会话 | LLM 自主决策 |
+| Skill | 提示词模板 | 自动注入上下文 |
+| Workflow | 确定性编排 | 代码预定义，无 LLM 决策 |
+
+| 工作流 | 功能 | 说明 |
+|--------|------|------|
+| organize | 整理工作流 | 步骤1-4：确认章节→创建文件夹→并行整理(世界观/人物/道具)→汇总 |
+| writing | 写作工作流 | 写作→审核→(通过)后处理→同步细纲，最多审核2次 |
+
+主 Agent 通过 `workflow` 工具调用工作流：
+
+```
+调用 workflow 工具：
+- workflow_name: "organize"
+- params: {"novel_name": "都市逍遥仙", "chapter_num": 6, "chapter_group": "06-10"}
+- description: "整理第6章参考信息"
+```
+
+审核判断使用结构化标记 `[AUDIT_RESULT: PASS/FAIL]`，脚本解析标记而非关键词匹配。
+
+工作流文件位置：`backend/packages/harness/deerflow/workflows/`
+
 ### 工作目录结构
 
 ```
 工作目录/book/[小说名称]/
 ├── card.json                    # 小说名片（JSON 格式）
 ├── 00-世界观/
-│   ├── story-bible.md           # 故事圣经（世界观、力量体系、核心冲突）
-│   ├── character-matrix.md      # 角色矩阵（角色档案、关系网）
+│   ├── 故事圣经.md           # 故事圣经（世界观、力量体系、核心冲突）
+│   ├── 角色矩阵.md      # 角色矩阵（角色档案、关系网）
 │   ├── subplot-board.md         # 支线板（多条故事线跟踪）
 │   └── emotional-arcs.md        # 情感弧线（角色情感发展）
 ├── 01-规划/
-│   ├── volume-outline.md        # 卷纲（分卷概览 + 章节分组规划）
-│   ├── book-rules.json          # 本书规则（JSON 格式）
-│   ├── book-plan.md             # 创作计划
+│   ├── 卷纲.md        # 卷纲（分卷概览 + 章节分组规划）
+│   ├── 本书规则.json          # 本书规则（JSON 格式）
+│   ├── 创作计划.md             # 创作计划
 │   └── chapters/                # 章节细纲（每 5 章一组）
 ├── 02-正文/
 │   └── 第N-M章/
 │       ├── _task/               # 临时任务目录
 │       └── 第N章.md             # 章节正文
 ├── 03-状态/
-│   ├── current-state.md         # 当前状态卡
-│   ├── pending-hooks.md         # 伏笔池
-│   └── chapter-summaries.md     # 章节摘要汇总
+│   ├── 当前状态卡.md         # 当前状态卡
+│   ├── 待办事项.md         # 伏笔池
+│   └── 章节摘要汇总.md     # 章节摘要汇总
 ├── 04-审稿/
 │   ├── 第01章-审计报告.md
 │   └── 第01章-修改记录.md

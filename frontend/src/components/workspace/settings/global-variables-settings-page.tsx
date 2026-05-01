@@ -1,17 +1,27 @@
 "use client";
 
 import {
+  CheckIcon,
+  ChevronDownIcon,
   LockIcon,
   PencilIcon,
   PlusIcon,
   Trash2Icon,
   XIcon,
 } from "lucide-react";
-import { useId, useState } from "react";
+import { useEffect, useId, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import {
+  Command,
+  CommandEmpty,
+  CommandGroup,
+  CommandInput,
+  CommandItem,
+  CommandList,
+} from "@/components/ui/command";
 import {
   Dialog,
   DialogContent,
@@ -36,6 +46,9 @@ import type {
   VariableScope,
 } from "@/core/global-variables/types";
 import { useI18n } from "@/core/i18n/hooks";
+import { useThreads } from "@/core/threads/hooks";
+import { titleOfThread } from "@/core/threads/utils";
+import { formatTimeAgo } from "@/core/utils/datetime";
 
 import { SettingsSection } from "./settings-section";
 
@@ -45,6 +58,143 @@ type VariableFormState = {
   description: string;
   llm_editable: boolean;
 };
+
+function ThreadCombobox({
+  value,
+  onChange,
+}: {
+  value: string;
+  onChange: (threadId: string) => void;
+}) {
+  const { t } = useI18n();
+  const [open, setOpen] = useState(false);
+  const containerRef = useRef<HTMLDivElement>(null);
+
+  // Pull all threads, default sorted by updated_at desc (most active first).
+  // Fetch a generous page size so search has enough candidates without paging.
+  const { data: threads = [], isLoading } = useThreads({
+    limit: 200,
+    sortBy: "updated_at",
+    sortOrder: "desc",
+    select: ["thread_id", "updated_at", "values", "metadata"],
+  });
+
+  // Close popover when clicking outside.
+  useEffect(() => {
+    if (!open) return;
+    function handleMouseDown(event: MouseEvent) {
+      if (
+        containerRef.current &&
+        !containerRef.current.contains(event.target as Node)
+      ) {
+        setOpen(false);
+      }
+    }
+    function handleKeyDown(event: KeyboardEvent) {
+      if (event.key === "Escape") setOpen(false);
+    }
+    document.addEventListener("mousedown", handleMouseDown);
+    document.addEventListener("keydown", handleKeyDown);
+    return () => {
+      document.removeEventListener("mousedown", handleMouseDown);
+      document.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [open]);
+
+  const selectedThread = useMemo(
+    () => threads.find((thread) => thread.thread_id === value),
+    [threads, value],
+  );
+
+  const triggerLabel = selectedThread
+    ? titleOfThread(selectedThread)
+    : t.globalVariables.selectThreadPlaceholder;
+
+  return (
+    <div ref={containerRef} className="relative flex-1">
+      <Button
+        type="button"
+        variant="outline"
+        role="combobox"
+        aria-expanded={open}
+        className="w-full justify-between font-normal"
+        onClick={() => setOpen((prev) => !prev)}
+      >
+        <span
+          className={`truncate ${
+            selectedThread ? "" : "text-muted-foreground"
+          }`}
+        >
+          {triggerLabel}
+        </span>
+        <ChevronDownIcon className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+      </Button>
+      {open && (
+        <div className="bg-popover text-popover-foreground absolute top-full left-0 z-50 mt-1 w-full min-w-[260px] rounded-md border shadow-md">
+          <Command
+            // Custom filter: only match against thread title (keywords),
+            // never against the thread_id (which is used as item value).
+            filter={(_itemValue, search, keywords) => {
+              const query = search.trim().toLowerCase();
+              if (!query) return 1;
+              const haystack = (keywords ?? []).join(" ").toLowerCase();
+              return haystack.includes(query) ? 1 : 0;
+            }}
+          >
+            <CommandInput
+              placeholder={t.globalVariables.searchThreadKeywordPlaceholder}
+            />
+            <CommandList>
+              {isLoading ? (
+                <div className="text-muted-foreground p-3 text-center text-sm">
+                  {t.common.loading}
+                </div>
+              ) : (
+                <>
+                  <CommandEmpty>
+                    {t.globalVariables.noThreadsFound}
+                  </CommandEmpty>
+                  <CommandGroup>
+                    {threads.map((thread) => {
+                      const title = titleOfThread(thread);
+                      const updatedAt = thread.updated_at
+                        ? formatTimeAgo(thread.updated_at)
+                        : "";
+                      const isSelected = thread.thread_id === value;
+                      return (
+                        <CommandItem
+                          key={thread.thread_id}
+                          value={thread.thread_id}
+                          keywords={[title]}
+                          onSelect={() => {
+                            onChange(thread.thread_id);
+                            setOpen(false);
+                          }}
+                        >
+                          <div className="flex min-w-0 flex-1 flex-col gap-0.5">
+                            <span className="truncate text-sm">{title}</span>
+                            {updatedAt && (
+                              <span className="text-muted-foreground text-xs">
+                                {updatedAt}
+                              </span>
+                            )}
+                          </div>
+                          {isSelected && (
+                            <CheckIcon className="ml-2 h-4 w-4 shrink-0" />
+                          )}
+                        </CommandItem>
+                      );
+                    })}
+                  </CommandGroup>
+                </>
+              )}
+            </CommandList>
+          </Command>
+        </div>
+      )}
+    </div>
+  );
+}
 
 const DEFAULT_FORM_STATE: VariableFormState = {
   key: "",
@@ -370,13 +520,22 @@ function VariablesTable({
   );
 }
 
-export function GlobalVariablesSettingsPage() {
+export function GlobalVariablesSettingsPage({
+  currentThreadId,
+}: {
+  currentThreadId?: string;
+}) {
   const { t } = useI18n();
   const [scope, setScope] = useState<VariableScope>("project");
-  const [threadId, setThreadId] = useState("");
+  const [threadIdInput, setThreadIdInput] = useState("");
   const [editingVar, setEditingVar] = useState<GlobalVariable | null>(null);
   const [deletingVar, setDeletingVar] = useState<GlobalVariable | null>(null);
   const [formOpen, setFormOpen] = useState(false);
+
+  const effectiveThreadId =
+    scope === "thread"
+      ? currentThreadId || threadIdInput || undefined
+      : undefined;
 
   const {
     variables,
@@ -386,7 +545,7 @@ export function GlobalVariablesSettingsPage() {
     updateVariable,
     deleteVariable,
     reload,
-  } = useGlobalVariables(scope, scope === "thread" ? threadId : undefined);
+  } = useGlobalVariables(scope, effectiveThreadId);
 
   function handleAdd() {
     setEditingVar(null);
@@ -457,21 +616,31 @@ export function GlobalVariablesSettingsPage() {
           </Select>
 
           {scope === "thread" && (
-            <Input
-              value={threadId}
-              onChange={(event) => setThreadId(event.target.value)}
-              placeholder={t.globalVariables.searchThreadPlaceholder}
-              className="flex-1"
-            />
+            <div className="flex flex-1 items-center gap-2">
+              {currentThreadId ? (
+                <span className="text-muted-foreground text-sm">
+                  {t.globalVariables.currentThread}:{" "}
+                  <code className="text-foreground bg-muted rounded px-1 text-xs">
+                    {currentThreadId}
+                  </code>
+                </span>
+              ) : (
+                <ThreadCombobox
+                  value={threadIdInput}
+                  onChange={setThreadIdInput}
+                />
+              )}
+            </div>
           )}
 
           <Button
             variant="outline"
             size="sm"
             onClick={() => void reload()}
+            disabled={isLoading}
             className="flex-shrink-0"
           >
-            {t.common.loading}
+            {isLoading ? t.common.loading : t.common.refresh}
           </Button>
         </div>
 

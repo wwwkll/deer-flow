@@ -1,4 +1,4 @@
-import { Check, ChevronsUpDown } from "lucide-react";
+import { Check, ChevronsUpDown, Lock } from "lucide-react";
 import { useState, useCallback, useMemo } from "react";
 
 import { Button } from "@/components/ui/button";
@@ -21,16 +21,25 @@ interface NovelTagSelectorProps {
   value?: string;
   onChange: (tag: string | undefined) => void;
   tags: string[];
-  disabled?: boolean;
+  locked?: boolean;
+  isLoading?: boolean;
+  error?: Error | null;
 }
 
 export function NovelTagSelector({
   value,
   onChange,
   tags,
-  disabled = false,
+  locked = false,
+  isLoading = false,
+  error = null,
 }: NovelTagSelectorProps) {
   const [open, setOpen] = useState(false);
+
+  const extractNovelName = (path: string) => {
+    const segments = path.split("/").filter(Boolean);
+    return segments[segments.length - 1] ?? path;
+  };
 
   const handleSelect = useCallback(
     (tag: string) => {
@@ -40,15 +49,25 @@ export function NovelTagSelector({
     [onChange, value],
   );
 
-  const handleClear = useCallback(() => {
-    onChange(undefined);
-    setOpen(false);
-  }, [onChange]);
-
   const selectedTag = useMemo(
     () => tags.find((tag) => tag === value),
     [tags, value],
   );
+
+  if (locked && value) {
+    return (
+      <Button
+        variant="outline"
+        className="w-full cursor-not-allowed justify-between opacity-60"
+        disabled
+      >
+        <span className="flex items-center gap-1.5">
+          <Lock className="h-3.5 w-3.5" />
+          {extractNovelName(value)}
+        </span>
+      </Button>
+    );
+  }
 
   return (
     <DropdownMenu open={open} onOpenChange={setOpen}>
@@ -58,9 +77,9 @@ export function NovelTagSelector({
           role="combobox"
           aria-expanded={open}
           className="w-full justify-between"
-          disabled={disabled}
+          disabled={isLoading}
         >
-          {selectedTag ?? "选择进行中的小说（可选）"}
+          {selectedTag ? extractNovelName(selectedTag) : "选择所属小说（可选）"}
           <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
         </Button>
       </DropdownMenuTrigger>
@@ -68,19 +87,14 @@ export function NovelTagSelector({
         <Command>
           <CommandInput placeholder="搜索小说..." />
           <CommandList>
-            <CommandEmpty>没有找到小说</CommandEmpty>
+            <CommandEmpty>
+              {isLoading
+                ? "加载中..."
+                : error
+                  ? "加载失败，请重试"
+                  : "没有找到小说"}
+            </CommandEmpty>
             <CommandGroup>
-              {value && (
-                <CommandItem onSelect={handleClear}>
-                  <Check
-                    className={cn(
-                      "mr-2 h-4 w-4",
-                      !selectedTag ? "opacity-100" : "opacity-0",
-                    )}
-                  />
-                  清空选择
-                </CommandItem>
-              )}
               {tags.map((tag) => (
                 <CommandItem
                   key={tag}
@@ -93,7 +107,7 @@ export function NovelTagSelector({
                       value === tag ? "opacity-100" : "opacity-0",
                     )}
                   />
-                  {tag}
+                  {extractNovelName(tag)}
                 </CommandItem>
               ))}
             </CommandGroup>

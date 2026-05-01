@@ -178,14 +178,10 @@ def delete_variable_tool(
     if error:
         return error
 
-    variables = data.get("variables", {})
+    deleted = get_storage().delete(key, scope, thread_id=thread_id)
 
-    if key not in variables:
+    if not deleted:
         return f"Variable '{key}' not found in {scope} scope"
-
-    del variables[key]
-    data["variables"] = variables
-    get_storage().save(data, scope, thread_id=thread_id)
 
     return f"Deleted variable '{key}' from {scope} scope"
 

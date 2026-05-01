@@ -1,5 +1,7 @@
 "use client";
 
+import { use } from "react";
+
 import { PromptInputProvider } from "@/components/ai-elements/prompt-input";
 import { ArtifactsProvider } from "@/components/workspace/artifacts";
 import { SubtasksProvider } from "@/core/tasks/context";
@@ -11,9 +13,10 @@ export default function AgentChatLayout({
   children: React.ReactNode;
   params: Promise<{ thread_id: string }>;
 }) {
+  const { thread_id } = use(params);
   return (
     <SubtasksProvider>
-      <ArtifactsProvider threadId={params.thread_id}>
+      <ArtifactsProvider threadId={thread_id}>
         <PromptInputProvider>{children}</PromptInputProvider>
       </ArtifactsProvider>
     </SubtasksProvider>

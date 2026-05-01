@@ -9,6 +9,7 @@ import {
   Settings2Icon,
   SettingsIcon,
 } from "lucide-react";
+import { useParams } from "next/navigation";
 import { useEffect, useState } from "react";
 
 import {
@@ -51,6 +52,12 @@ function NavMenuButtonContent({
 }
 
 export function WorkspaceNavMenu() {
+  const params = useParams<{ thread_id?: string }>();
+  const currentThreadId =
+    params.thread_id && params.thread_id !== "new"
+      ? params.thread_id
+      : undefined;
+
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [settingsDefaultSection, setSettingsDefaultSection] = useState<
     "appearance" | "memory" | "tools" | "skills" | "notification" | "about"
@@ -69,6 +76,7 @@ export function WorkspaceNavMenu() {
         open={settingsOpen}
         onOpenChange={setSettingsOpen}
         defaultSection={settingsDefaultSection}
+        currentThreadId={currentThreadId}
       />
       <SidebarMenu className="w-full">
         <SidebarMenuItem>

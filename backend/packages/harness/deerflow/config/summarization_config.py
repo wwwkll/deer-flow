@@ -43,9 +43,13 @@ class SummarizationConfig(BaseModel):
         "{'type': 'tokens', 'value': 3000} keeps 3000 tokens, "
         "{'type': 'fraction', 'value': 0.3} keeps 30% of model's max input tokens",
     )
-    trim_tokens_to_summarize: int | None = Field(
+    trim_tokens_to_summarize: int | ContextSize | None = Field(
         default=4000,
-        description="Maximum tokens to keep when preparing messages for summarization. Pass null to skip trimming.",
+        description="Maximum tokens to keep when preparing messages for summarization. "
+        "Accepts an integer (fixed token count), a ContextSize object for fraction/tokens, "
+        "or null to skip trimming. "
+        "Examples: 4000 (fixed), {'type': 'fraction', 'value': 0.1} (10% of model max_tokens), "
+        "{'type': 'tokens', 'value': 4000} (explicit token count)",
     )
     summary_prompt: str | None = Field(
         default=None,

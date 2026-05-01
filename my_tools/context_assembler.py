@@ -46,16 +46,16 @@ def context_assembler(
     outline_content = read_file(outline_file)
 
     # 读取规则
-    rules = read_file(f"{book_path}/01-规划/book-rules.json")
+    rules = read_file(f"{book_path}/01-规划/本书规则.json")
 
     # 读取当前状态
-    current_state = read_file(f"{book_path}/03-状态/current-state.md")
+    current_state = read_file(f"{book_path}/03-状态/当前状态卡.md")
 
     # 读取伏笔
-    hooks = read_file(f"{book_path}/03-状态/pending-hooks.md")
+    hooks = read_file(f"{book_path}/03-状态/待办事项.md")
 
     # 读取前情提要（最近3章摘要）
-    summaries = read_file(f"{book_path}/03-状态/chapter-summaries.md")
+    summaries = read_file(f"{book_path}/03-状态/章节摘要汇总.md")
     # 提取最近3章摘要
     recent_summaries = ""
     if summaries:

@@ -5,7 +5,7 @@ from langchain.tools import BaseTool
 from deerflow.config import get_app_config
 from deerflow.reflection import resolve_variable
 from deerflow.sandbox.security import is_host_bash_allowed
-from deerflow.tools.builtins import ask_clarification_tool, present_file_tool, task_tool, view_image_tool
+from deerflow.tools.builtins import ask_clarification_tool, present_file_tool, task_tool, view_image_tool, workflow_tool
 from deerflow.tools.builtins.tool_search import reset_deferred_registry
 
 logger = logging.getLogger(__name__)
@@ -17,6 +17,7 @@ BUILTIN_TOOLS = [
 
 SUBAGENT_TOOLS = [
     task_tool,
+    workflow_tool,
     # task_status_tool is no longer exposed to LLM (backend handles polling internally)
 ]
 

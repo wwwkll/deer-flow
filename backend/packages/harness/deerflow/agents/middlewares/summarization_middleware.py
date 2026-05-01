@@ -109,13 +109,51 @@ class DeerFlowSummarizationMiddleware(SummarizationMiddleware):
         preserve_recent_skill_tokens_per_skill: int = 5_000,
         **kwargs,
     ) -> None:
-        super().__init__(*args, **kwargs)
+        trim = kwargs.get("trim_tokens_to_summarize")
+        if isinstance(trim, tuple) and len(trim) == 2:
+            kwargs["trim_tokens_to_summarize"] = None
+            super().__init__(*args, **kwargs)
+            kind, value = trim
+            max_input = self._resolve_max_tokens_for_fraction()
+            if kind == "fraction" and max_input is not None:
+                resolved = int(max_input * value)
+                logger.info("Resolved trim_tokens_to_summarize fraction %.2f -> %d (max_tokens=%d)", value, resolved, max_input)
+                self.trim_tokens_to_summarize = resolved
+            elif kind == "tokens":
+                self.trim_tokens_to_summarize = int(value)
+            else:
+                logger.warning("Cannot resolve trim_tokens_to_summarize %s (max_tokens=%s); disabling trim", trim, max_input)
+                self.trim_tokens_to_summarize = None
+        else:
+            super().__init__(*args, **kwargs)
         self._skills_container_path = skills_container_path or "/mnt/skills"
         self._skill_file_read_tool_names = frozenset(skill_file_read_tool_names or {"read_file", "read", "view", "cat"})
         self._before_summarization_hooks = before_summarization or []
         self._preserve_recent_skill_count = max(0, preserve_recent_skill_count)
         self._preserve_recent_skill_tokens = max(0, preserve_recent_skill_tokens)
         self._preserve_recent_skill_tokens_per_skill = max(0, preserve_recent_skill_tokens_per_skill)
+
+    def _resolve_max_tokens_for_fraction(self) -> int | None:
+        """Resolve max tokens for fraction calculation.
+
+        Priority: profile.max_input_tokens > model.max_tokens > None.
+        """
+        profile_limit = self._get_profile_limits()
+        if profile_limit is not None:
+            return profile_limit
+
+        model = self.model
+        max_tokens = getattr(model, "max_tokens", None)
+        if isinstance(max_tokens, int) and max_tokens > 0:
+            return max_tokens
+
+        model_kwargs = getattr(model, "model_kwargs", None)
+        if isinstance(model_kwargs, dict):
+            mt = model_kwargs.get("max_tokens")
+            if isinstance(mt, int) and mt > 0:
+                return mt
+
+        return None
 
     def before_model(self, state: AgentState, runtime: Runtime) -> dict | None:
         return self._maybe_summarize(state, runtime)
@@ -138,6 +176,14 @@ class DeerFlowSummarizationMiddleware(SummarizationMiddleware):
         messages_to_summarize, preserved_messages = self._partition_with_skill_rescue(messages, cutoff_index)
         self._fire_hooks(messages_to_summarize, preserved_messages, runtime)
         summary = self._create_summary(messages_to_summarize)
+
+        if not summary or summary.startswith("Error generating summary:"):
+            logger.warning(
+                "Summarization failed (summary=%s); skipping to preserve conversation history",
+                summary[:200] if summary else "<empty>",
+            )
+            return None
+
         new_messages = self._build_new_messages(summary)
 
         return {
@@ -163,6 +209,14 @@ class DeerFlowSummarizationMiddleware(SummarizationMiddleware):
         messages_to_summarize, preserved_messages = self._partition_with_skill_rescue(messages, cutoff_index)
         self._fire_hooks(messages_to_summarize, preserved_messages, runtime)
         summary = await self._acreate_summary(messages_to_summarize)
+
+        if not summary or summary.startswith("Error generating summary:"):
+            logger.warning(
+                "Summarization failed (summary=%s); skipping to preserve conversation history",
+                summary[:200] if summary else "<empty>",
+            )
+            return None
+
         new_messages = self._build_new_messages(summary)
 
         return {

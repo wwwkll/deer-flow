@@ -79,7 +79,7 @@ export function CodeEditor({
         className,
       )}
     >
-      {isLoading ? (
+      {isLoading && readonly !== false ? (
         <Textarea
           className={cn(
             "h-full overflow-auto font-mono [&_.cm-editor]:h-full [&_.cm-focused]:outline-none!",

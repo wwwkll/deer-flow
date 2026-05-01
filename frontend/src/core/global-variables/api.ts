@@ -20,6 +20,17 @@ export async function fetchProjectVariables(): Promise<VariablesListResponse> {
   return res.json();
 }
 
+export async function fetchMergedVariables(
+  threadId: string,
+): Promise<VariablesListResponse> {
+  const res = await fetch(
+    `${API_BASE}/merged?thread_id=${encodeURIComponent(threadId)}`,
+  );
+  if (!res.ok)
+    throw new Error(`Failed to fetch merged variables: ${res.statusText}`);
+  return res.json();
+}
+
 export async function fetchThreadVariables(
   threadId: string,
 ): Promise<VariablesListResponse> {

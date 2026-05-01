@@ -39,10 +39,15 @@ type SettingsSection =
 
 type SettingsDialogProps = React.ComponentProps<typeof Dialog> & {
   defaultSection?: SettingsSection;
+  currentThreadId?: string;
 };
 
 export function SettingsDialog(props: SettingsDialogProps) {
-  const { defaultSection = "appearance", ...dialogProps } = props;
+  const {
+    defaultSection = "appearance",
+    currentThreadId,
+    ...dialogProps
+  } = props;
   const { t } = useI18n();
   const [activeSection, setActiveSection] =
     useState<SettingsSection>(defaultSection);
@@ -143,7 +148,9 @@ export function SettingsDialog(props: SettingsDialogProps) {
               )}
               {activeSection === "notification" && <NotificationSettingsPage />}
               {activeSection === "globalVariables" && (
-                <GlobalVariablesSettingsPage />
+                <GlobalVariablesSettingsPage
+                  currentThreadId={currentThreadId}
+                />
               )}
               {activeSection === "about" && <AboutSettingsPage />}
             </div>

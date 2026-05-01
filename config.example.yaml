@@ -61,17 +61,70 @@ tools:
     use: deerflow.community.ddg_search.tools:web_search_tool
     max_results: 5
 
+  # Web search tool (requires Tavily API key)
+  # - name: web_search
+  #   group: web
+  #   use: deerflow.community.tavily.tools:web_search_tool
+  #   max_results: 5
+  #   # api_key: $TAVILY_API_KEY  # Set if needed
+
+  # Web search tool (uses InfoQuest, requires InfoQuest API key)
+  # - name: web_search
+  #   group: web
+  #   use: deerflow.community.infoquest.tools:web_search_tool
+  #   search_time_range: 10
+
+  # Web search tool (uses Exa, requires EXA_API_KEY)
+  # - name: web_search
+  #   group: web
+  #   use: deerflow.community.exa.tools:web_search_tool
+  #   max_results: 5
+  #   search_type: auto
+  #   contents_max_characters: 1000
+
+  # Web search tool (uses Firecrawl, requires FIRECRAWL_API_KEY)
+  # - name: web_search
+  #   group: web
+  #   use: deerflow.community.firecrawl.tools:web_search_tool
+  #   max_results: 5
+
+  # Web fetch tool (uses Exa)
+  # NOTE: Only one web_fetch provider can be active at a time.
+  # - name: web_fetch
+  #   group: web
+  #   use: deerflow.community.exa.tools:web_fetch_tool
+
   # Web fetch tool (uses Jina AI reader)
   - name: web_fetch
     group: web
     use: deerflow.community.jina_ai.tools:web_fetch_tool
     timeout: 10
 
+  # Web fetch tool (uses InfoQuest)
+  # - name: web_fetch
+  #   group: web
+  #   use: deerflow.community.infoquest.tools:web_fetch_tool
+  #   timeout: 10
+  #   fetch_time: 10
+  #   navigation_timeout: 30
+
+  # Web fetch tool (uses Firecrawl, requires FIRECRAWL_API_KEY)
+  # - name: web_fetch
+  #   group: web
+  #   use: deerflow.community.firecrawl.tools:web_fetch_tool
+
   # Image search tool (uses DuckDuckGo)
   - name: image_search
     group: web
     use: deerflow.community.image_search.tools:image_search_tool
     max_results: 5
+
+  # Image search tool (uses InfoQuest)
+  # - name: image_search
+  #   group: web
+  #   use: deerflow.community.infoquest.tools:image_search_tool
+  #   image_search_time_range: 10
+  #   image_size: "i"
 
   # File operations tools
   - name: ls
@@ -101,8 +154,6 @@ tools:
     use: deerflow.sandbox.tools:str_replace_tool
 
   # Bash execution tool
-  # Active only when using an isolated shell sandbox or when
-  # sandbox.allow_host_bash: true explicitly opts into host bash.
   - name: bash
     group: bash
     use: deerflow.sandbox.tools:bash_tool
@@ -160,11 +211,13 @@ summarization:
   model_name: null
   trigger:
     - type: tokens
-      value: 15564
+      value: 75000
   keep:
     type: messages
-    value: 10
-  trim_tokens_to_summarize: 15564
+    value: 20
+  trim_tokens_to_summarize:
+    type: fraction
+    value: 0.9375  # 93.75% of model max_tokens, auto-adjusts per model
   summary_prompt: null
   preserve_recent_skill_count: 5
   preserve_recent_skill_tokens: 25000
@@ -180,13 +233,13 @@ summarization:
 # ============================================================================
 
 memory:
-  enabled: true
+  enabled: false
   storage_path: memory.json
   debounce_seconds: 30
   model_name: null
   max_facts: 100
   fact_confidence_threshold: 0.7
-  injection_enabled: true
+  injection_enabled: false
   max_injection_tokens: 2000
 
 # ============================================================================
@@ -212,7 +265,6 @@ subagents:
   timeout_seconds: 900
   max_turns: 50
 
-  # Per-agent overrides
   agents:
     general-purpose:
       timeout_seconds: 1800
@@ -230,17 +282,15 @@ checkpointer:
 # ============================================================================
 # 使用说明：
 #   1. 将下方配置中需要启用的部分取消注释
-#   2. 按需修改参数值（如 API Key、模型等）
+#   2. 按需修改参数值
 #   3. 重启服务生效
 # ============================================================================
 
 # --- ① Tool Groups ---
-
 # tool_groups:
-#   - name: novel              # 小说写作工具组
+#   - name: novel
 
 # --- ② Tools ---
-
 # tools:
 #   - name: context_assembler
 #     group: novel
@@ -264,14 +314,8 @@ checkpointer:
 #   - novel-post-write-validator   写作后格式验证
 #   - novel-anti-ai-detector       AI 痕迹检测与消除
 #   - novel-plan-compliance        规划合规检查
-# Agent 在 config.yaml 中通过 skills 字段声明使用：
-#   skills:
-#     - novel-post-write-validator
-#     - novel-anti-ai-detector
-#     - novel-plan-compliance
 
 # --- ④ Subagents ---
-
 # subagents:
 #   timeout_seconds: 900
 #   max_turns: 50
@@ -294,14 +338,10 @@ checkpointer:
 #     novel-architect:
 #       description: |
 #         小说架构师，负责新建小说时生成完整基础设定。
-#         包括世界观、卷纲、规则、计划、初始状态、伏笔池。
 #       system_prompt: |
 #         你是小说创作系统的架构师，专门负责新建小说时生成完整的基础架构设定。
-#         ## 职责
-#         1. 世界观构建  2. 卷纲规划  3. 规则制定  4. 创作计划  5. 初始状态
-#         ## 输出文件
-#         - story-bible.md、volume-outline.md、book-rules.json
-#         - book-plan.md、current-state.md、pending-hooks.md
+#         ## 职责：世界观构建、卷纲规划、规则制定、创作计划、初始状态
+#         ## 输出文件：故事圣经.md、卷纲.md、本书规则.json、创作计划.md、当前状态卡.md、待办事项.md
 #       tools:
 #         - read_file
 #         - write_file
@@ -313,7 +353,7 @@ checkpointer:
 #     volume-planner:
 #       description: 卷纲规划师，负责编写或修改全书卷纲
 #       system_prompt: |
-#         你是小说创作系统的卷纲规划师，专门负责编写或修改全书的分卷大纲。
+#         你是小说创作系统的卷纲规划师。
 #         ## 职责：新建卷纲、修改卷纲、一致性维护、章节分组
 #       tools:
 #         - read_file
@@ -326,7 +366,7 @@ checkpointer:
 #     outline-planner:
 #       description: 细纲规划师，负责编写或修改章节细纲（每5章一组）
 #       system_prompt: |
-#         你是小说创作系统的细纲规划师，专门负责编写或修改章节细纲。
+#         你是小说创作系统的细纲规划师。
 #         ## 工作模式：new（新建）、revise（修改）、sync（同步）
 #       tools:
 #         - read_file
@@ -337,9 +377,9 @@ checkpointer:
 #       timeout_seconds: 1200
 #
 #     book-rules-manager:
-#       description: 本书规则管理器，负责管理 book-rules.json
+#       description: 本书规则管理器，负责管理 本书规则.json
 #       system_prompt: |
-#         你是小说创作系统的规则管理器，负责管理 book-rules.json 文件。
+#         你是小说创作系统的规则管理器。
 #         ## 规则类别：hard_rules、style_guidelines、constraints、banned_words
 #       tools:
 #         - read_file
@@ -349,9 +389,9 @@ checkpointer:
 #       timeout_seconds: 600
 #
 #     novel-world-organizer:
-#       description: 世界观整理员，负责整理当前章节需要的世界观设定
+#       description: 世界观整理员
 #       system_prompt: |
-#         你是小说创作系统的世界观整理员，负责在写作前整理当前章节需要的世界观设定。
+#         你是小说创作系统的世界观整理员。
 #       tools:
 #         - read_file
 #         - write_file
@@ -360,9 +400,9 @@ checkpointer:
 #       timeout_seconds: 600
 #
 #     novel-character-organizer:
-#       description: 人物整理员，负责整理当前章节出场的人物信息
+#       description: 人物整理员
 #       system_prompt: |
-#         你是小说创作系统的人物整理员，负责在写作前整理当前章节出场的人物信息。
+#         你是小说创作系统的人物整理员。
 #       tools:
 #         - read_file
 #         - write_file
@@ -371,9 +411,9 @@ checkpointer:
 #       timeout_seconds: 600
 #
 #     novel-item-organizer:
-#       description: 道具整理员，负责整理当前章节出场的道具和技能
+#       description: 道具整理员
 #       system_prompt: |
-#         你是小说创作系统的道具整理员，负责在写作前整理当前章节出场的道具和技能信息。
+#         你是小说创作系统的道具整理员。
 #       tools:
 #         - read_file
 #         - write_file
@@ -381,8 +421,22 @@ checkpointer:
 #       max_turns: 40
 #       timeout_seconds: 600
 #
+#     novel-storyline-organizer:
+#       description: 故事线整理员
+#       system_prompt: |
+#         你是小说创作系统的故事线整理员。
+#         ## 职责：整理往期剧情线，从所有章节大纲中提取并缩写主要剧情，生成故事线参考。
+#         ## 输出：_task/故事线参考.md
+#         ## 规则：保留重要承接点、转折点、数值/系统面板/天赋/物资相关内容，近期章节重点总结。
+#       tools:
+#         - read_file
+#         - write_file
+#       model: inherit
+#       max_turns: 60
+#       timeout_seconds: 1200
+#
 #     novel-writer:
-#       description: 长篇网文写手，负责根据写作任务汇总撰写小说正文
+#       description: 长篇网文写手
 #       system_prompt: |
 #         你是一个专业的长篇网文写手。
 #         ## 写作风格：口语化对白、强情绪强冲突、长短句结合
@@ -396,7 +450,7 @@ checkpointer:
 #       timeout_seconds: 1800
 #
 #     continuity-auditor:
-#       description: 连续性审计师，负责多维度审核小说章节一致性
+#       description: 连续性审计师
 #       system_prompt: |
 #         你是小说创作系统的连续性审计师。
 #         ## 审计维度：角色一致性、世界观一致性、叙事连贯性、伏笔管理、写作质量、AI痕迹检测
@@ -408,7 +462,7 @@ checkpointer:
 #       timeout_seconds: 1200
 #
 #     novel-reviser:
-#       description: 修稿编辑，负责根据审计报告修改小说正文
+#       description: 修稿编辑
 #       system_prompt: |
 #         你是小说创作系统的修稿编辑。
 #         ## 修稿模式：polish、rewrite、rework、anti-detect、spot-fix
@@ -421,10 +475,9 @@ checkpointer:
 #       timeout_seconds: 1800
 #
 #     state-settler:
-#       description: 结算器，负责将写作输出的事实变更合并到状态文件
+#       description: 结算器
 #       system_prompt: |
 #         你是小说创作系统的结算器。
-#         ## 职责：更新 current-state.md、pending-hooks.md、chapter-summaries.md
 #       tools:
 #         - read_file
 #         - write_file
@@ -434,7 +487,7 @@ checkpointer:
 #       timeout_seconds: 1200
 #
 #     chapter-summarizer:
-#       description: 章节总结员，负责从小说正文生成章节摘要
+#       description: 章节总结员
 #       system_prompt: |
 #         你是小说创作系统的章节总结助理。
 #       tools:
@@ -445,7 +498,7 @@ checkpointer:
 #       timeout_seconds: 600
 #
 #     card-manager:
-#       description: 名片管理器，负责更新小说名片（card.json）
+#       description: 名片管理器
 #       system_prompt: |
 #         你是小说创作系统的名片管理助理。
 #       tools:
@@ -456,7 +509,7 @@ checkpointer:
 #       timeout_seconds: 600
 #
 #     hook-manager:
-#       description: 伏笔管理器，负责管理伏笔池状态
+#       description: 伏笔管理器
 #       system_prompt: |
 #         你是小说创作系统的伏笔管理助理。
 #         ## 伏笔状态：open、progressing、resolved
@@ -466,3 +519,44 @@ checkpointer:
 #       model: inherit
 #       max_turns: 40
 #       timeout_seconds: 600
+#
+# ============================================================================
+# ⑤ Workflows Configuration (工作流配置)
+# ============================================================================
+# 工作流是确定性的任务编排，不依赖 LLM 决策，保证流程完整执行。
+# 主 Agent 通过 workflow 工具调用工作流。
+#
+# 内置工作流：
+#   - organize: 整理工作流（步骤1-4，包含并行整理）
+#   - writing:  写作工作流（写作-审核-后处理，最多审核2次）
+#
+# 工作流不是 Agent，也不是 Skill：
+#   - Agent: 独立 LLM 会话，LLM 自主决策
+#   - Skill: 提示词模板，自动注入上下文
+#   - Workflow: 确定性编排，代码预定义，无 LLM 决策
+#
+# 工作流内部通过 call_subagent() 调用子 Agent，使用 custom_agents 中的配置。
+# 子 Agent 的 system_prompt 支持 {{xxx}} 全局变量替换。
+#
+# 审核判断机制：
+#   工作流要求 continuity-auditor 在报告末尾输出结构化标记：
+#   - [AUDIT_RESULT: PASS] 审核通过
+#   - [AUDIT_RESULT: FAIL] 审核不通过
+#   脚本解析标记，不依赖关键词匹配。
+#
+# 使用示例（在 SOUL.md 中）：
+#   调用 workflow 工具：
+#   - workflow_name: "organize"
+#   - params: {"novel_name": "xxx", "chapter_num": 6, "chapter_group": "06-10"}
+#   - description: "整理第6章参考信息"
+#
+# 工作流文件位置：
+#   backend/packages/harness/deerflow/workflows/
+#   ├── __init__.py
+#   ├── states.py           状态类型定义
+#   ├── registry.py         工作流注册表
+#   ├── executor.py         工作流执行引擎
+#   ├── helpers.py          辅助函数（调用子Agent）
+#   ├── novel_organize.py   整理工作流
+#   └── novel_writing.py    写作工作流
+# ============================================================================

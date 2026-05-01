@@ -21,6 +21,7 @@ import { ThreadTitle } from "@/components/workspace/thread-title";
 import { TodoList } from "@/components/workspace/todo-list";
 import { TokenUsageIndicator } from "@/components/workspace/token-usage-indicator";
 import { Welcome } from "@/components/workspace/welcome";
+import { fetchMergedVariables } from "@/core/global-variables/api";
 import { useI18n } from "@/core/i18n/hooks";
 import { useModels } from "@/core/models/hooks";
 import { useNotification } from "@/core/notification/hooks";
@@ -90,8 +91,26 @@ export default function ChatPage() {
       MESSAGE_LIST_FOLLOWUPS_EXTRA_PADDING_BOTTOM
     : undefined;
 
+  // -- Fetch novel_toc --
+  const novelTocRef = useRef<string | null>(null);
+  const [novelToc, setNovelToc] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!threadId) return;
+    fetchMergedVariables(threadId)
+      .then((data) => {
+        const tocVar = data.variables.find((v) => v.key === "novel_toc");
+        const toc = tocVar?.value ?? null;
+        novelTocRef.current = toc;
+        setNovelToc(toc);
+      })
+      .catch(() => {
+        novelTocRef.current = null;
+        setNovelToc(null);
+      });
+  }, [threadId]);
+
   // -- Auto resume monitor --
-  const monitorLastActivityRef = useRef(Date.now());
   const {
     monitorState,
     openDialog: openMonitorDialog,
@@ -101,11 +120,8 @@ export default function ChatPage() {
     stopMonitor,
   } = useAutoResumeMonitor(
     isNewThread ? undefined : threadId,
+    novelToc,
     () => thread.isLoading,
-    () => monitorLastActivityRef.current,
-    (ts: number) => {
-      monitorLastActivityRef.current = ts;
-    },
     useCallback(
       async (msg: string) => {
         await sendMessage(threadId, { text: msg, files: [] });
@@ -113,13 +129,6 @@ export default function ChatPage() {
       [sendMessage, threadId],
     ),
   );
-
-  // Track activity when thread is loading
-  useEffect(() => {
-    if (thread.isLoading) {
-      monitorLastActivityRef.current = Date.now();
-    }
-  }, [thread.isLoading]);
 
   return (
     <ThreadContext.Provider value={{ thread, isMock }}>

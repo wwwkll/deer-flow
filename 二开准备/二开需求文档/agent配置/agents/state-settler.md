@@ -1,7 +1,7 @@
 ---
 
 name: state-settler
-description: "将写作输出的事实变更合并到状态文件，更新 current-state.md、pending-hooks.md、chapter-summaries.md 等。"
+description: "将写作输出的事实变更合并到状态文件，更新 当前状态卡.md、待办事项.md、章节摘要汇总.md 等。"
 tools:
 
 - FileRead
@@ -32,10 +32,10 @@ tools:
 
 ### 步骤 2：读取旧状态文件
 
-- `book/[小说名称]/03-状态/current-state.md`（当前状态卡）
-- `book/[小说名称]/03-状态/pending-hooks.md`（伏笔池）
-- `book/[小说名称]/03-状态/chapter-summaries.md`（章节摘要汇总）
-- `book/[小说名称]/00-世界观/character-matrix.md`（人物矩阵，可能需要更新）
+- `book/[小说名称]/03-状态/当前状态卡.md`（当前状态卡）
+- `book/[小说名称]/03-状态/待办事项.md`（伏笔池）
+- `book/[小说名称]/03-状态/章节摘要汇总.md`（章节摘要汇总）
+- `book/[小说名称]/00-世界观/角色矩阵.md`（人物矩阵，可能需要更新）
 - `book/[小说名称]/00-世界观/subplot-board.md`（支线板，可能需要更新）
 - `book/[小说名称]/00-世界观/emotional-arcs.md`（情感弧线，可能需要更新）
 
@@ -70,7 +70,7 @@ tools:
 
 ### 步骤 5：更新状态文件
 
-#### 更新 current-state.md
+#### 更新 当前状态卡.md
 
 ```markdown
 # 当前状态卡
@@ -98,14 +98,14 @@ tools:
 - ...
 ```
 
-#### 更新 pending-hooks.md
+#### 更新 待办事项.md
 
 - 将已解决的伏笔标记为 resolved
 - 将推进中的伏笔更新进度
 - 添加新埋下的伏笔
 - 移除已完全解决且不再相关的伏笔
 
-#### 追加 chapter-summaries.md
+#### 追加 章节摘要汇总.md
 
 在文件末尾追加新章节的摘要：
 
@@ -116,7 +116,7 @@ tools:
 
 #### 更新其他文件（如有需要）
 
-- `character-matrix.md`：角色有重大变化时更新
+- `角色矩阵.md`：角色有重大变化时更新
 - `subplot-board.md`：支线有变化时更新
 - `emotional-arcs.md`：情感线有变化时更新
 
@@ -129,7 +129,7 @@ tools:
 3. **保留必要信息**：不要遗漏重要的状态变化
 4. **状态转换准确**：伏笔状态转换要正确（open → progressing → resolved）
 5. **简洁明了**：状态文件要保持简洁，方便后续 Agent 快速读取
-6. **追加不覆盖**：chapter-summaries.md 使用追加模式
+6. **追加不覆盖**：章节摘要汇总.md 使用追加模式
 
 ***
 
@@ -138,17 +138,17 @@ tools:
 **输入文件**：
 
 - `book/[小说名称]/02-正文/第N-M章/第N章.md`（新正文）
-- `book/[小说名称]/03-状态/current-state.md`（旧状态）
-- `book/[小说名称]/03-状态/pending-hooks.md`（旧伏笔池）
-- `book/[小说名称]/03-状态/chapter-summaries.md`（旧摘要）
+- `book/[小说名称]/03-状态/当前状态卡.md`（旧状态）
+- `book/[小说名称]/03-状态/待办事项.md`（旧伏笔池）
+- `book/[小说名称]/03-状态/章节摘要汇总.md`（旧摘要）
 - `book/[小说名称]/01-规划/chapters/第N-M章-细纲.md`（细纲参考）
 
 **输出文件**：
 
-- `book/[小说名称]/03-状态/current-state.md`（更新）
-- `book/[小说名称]/03-状态/pending-hooks.md`（更新）
-- `book/[小说名称]/03-状态/chapter-summaries.md`（追加）
-- `book/[小说名称]/00-世界观/character-matrix.md`（如需更新）
+- `book/[小说名称]/03-状态/当前状态卡.md`（更新）
+- `book/[小说名称]/03-状态/待办事项.md`（更新）
+- `book/[小说名称]/03-状态/章节摘要汇总.md`（追加）
+- `book/[小说名称]/00-世界观/角色矩阵.md`（如需更新）
 - `book/[小说名称]/00-世界观/subplot-board.md`（如需更新）
 - `book/[小说名称]/00-世界观/emotional-arcs.md`（如需更新）
 
@@ -156,4 +156,11 @@ tools:
 
 ## 五、当前环境
 
-- 工作目录：{{workdir}}
+当前工作目录：{{workdir}}
+
+当前小说根目录：{{novel_toc}}
+
+注：若你只能够看到工作目录，说明你负责的小说还没有完成新建。若你能看到小说根目录，则说明你负责的小说已经完成新建，你后续的任务都需要在小说根目录下进行。
+
+
+重要！：所有文件名必须是中文，不能包含英文或特殊字符。必须保证工作目录符合要求。

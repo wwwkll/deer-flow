@@ -219,23 +219,6 @@ export function useThreadStream({
           })
           .catch(() => ({}));
       }
-
-      // Save novel_tag as a thread-level global variable if selected
-      if (context.novel_tag && !isMock) {
-        void fetch(
-          `${getBackendBaseURL()}/api/global-variables/threads/${meta.thread_id}/novel_tag`,
-          {
-            method: "PUT",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              value: context.novel_tag,
-              description: "当前正在进行的小说",
-              is_system: true,
-              llm_editable: false,
-            }),
-          },
-        ).catch(() => ({}));
-      }
     },
     onLangChainEvent(event) {
       if (event.event === "on_tool_end") {
@@ -501,6 +484,7 @@ export function useThreadStream({
             threadId: threadId,
             streamSubgraphs: true,
             streamResumable: true,
+            multitaskStrategy: "rollback",
             config: {
               recursion_limit: 1000,
             },

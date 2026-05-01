@@ -1,6 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 
-import { getBackendBaseURL } from "@/core/config";
+import { getBackendBaseURL } from "../config";
 
 export function useNovelTags() {
   return useQuery<{ tags: string[] }>({
@@ -12,6 +12,37 @@ export function useNovelTags() {
       }
       return response.json();
     },
-    staleTime: 5 * 60 * 1000, // 5 minutes
+    staleTime: 5 * 60 * 1000,
+  });
+}
+
+interface ThreadVariable {
+  key: string;
+  value: string;
+  description: string;
+  is_system: boolean;
+  llm_editable: boolean;
+  updated_at: string;
+  updated_by: string;
+}
+
+export function useThreadNovelToc(threadId: string, isNewThread: boolean) {
+  return useQuery<string | undefined>({
+    queryKey: ["thread-novel-toc", threadId],
+    enabled: !isNewThread,
+    queryFn: async () => {
+      const response = await fetch(
+        `${getBackendBaseURL()}/api/global-variables/threads/${threadId}`,
+      );
+      if (!response.ok) {
+        return undefined;
+      }
+      const data = (await response.json()) as {
+        variables: ThreadVariable[];
+      };
+      const novelToc = data.variables.find((v) => v.key === "novel_toc");
+      return novelToc?.value;
+    },
+    staleTime: 30 * 1000,
   });
 }
