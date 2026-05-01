@@ -21,6 +21,7 @@ async def write_chapter(state: NovelWorkflowState) -> dict[str, Any]:
     chapter_group = state.get("chapter_group", "")
     writing_task_summary = state.get("writing_task_summary", "")
     thread_id = state.get("thread_id")
+    model_name = state.get("model_name")
 
     if not novel_name:
         raise ValueError("缺少必需参数: novel_name")
@@ -66,7 +67,7 @@ async def write_chapter(state: NovelWorkflowState) -> dict[str, Any]:
 """
 
     try:
-        result = await call_subagent("novel-writer", task)
+        result = await call_subagent("novel-writer", task, parent_model=model_name)
         return {"chapter_content": output_path, "chapter_group": chapter_group_normalized}
     except Exception as e:
         logger.error(f"Write chapter failed: {e}")
@@ -86,6 +87,7 @@ async def audit_chapter(state: NovelWorkflowState) -> dict[str, Any]:
     chapter_num = state.get("chapter_num", 0)
     chapter_content = state.get("chapter_content", "")
     thread_id = state.get("thread_id")
+    model_name = state.get("model_name")
 
     logger.info(f"Writing workflow: auditing chapter {chapter_num}")
 
@@ -115,7 +117,7 @@ async def audit_chapter(state: NovelWorkflowState) -> dict[str, Any]:
 """
 
     try:
-        result = await call_subagent("continuity-auditor", task)
+        result = await call_subagent("continuity-auditor", task, parent_model=model_name)
         passed = _parse_audit_result(result)
         logger.info(f"Audit result for chapter {chapter_num}: {'PASS' if passed else 'FAIL'}")
         return {
@@ -135,6 +137,7 @@ async def revise_chapter(state: NovelWorkflowState) -> dict[str, Any]:
     chapter_content = state.get("chapter_content", "")
     audit_report = state.get("audit_report", "")
     thread_id = state.get("thread_id")
+    model_name = state.get("model_name")
 
     logger.info(f"Writing workflow: revising chapter {chapter_num}")
 
@@ -168,7 +171,7 @@ async def revise_chapter(state: NovelWorkflowState) -> dict[str, Any]:
 """
 
     try:
-        result = await call_subagent("novel-reviser", task)
+        result = await call_subagent("novel-reviser", task, parent_model=model_name)
         return {"chapter_content": output_path}
     except Exception as e:
         logger.error(f"Revise chapter failed: {e}")
@@ -180,6 +183,7 @@ async def post_process(state: NovelWorkflowState) -> dict[str, Any]:
     chapter_num = state.get("chapter_num", 0)
     chapter_content = state.get("chapter_content", "")
     thread_id = state.get("thread_id")
+    model_name = state.get("model_name")
 
     logger.info(f"Writing workflow: post-processing chapter {chapter_num}")
 
@@ -208,7 +212,7 @@ async def post_process(state: NovelWorkflowState) -> dict[str, Any]:
 
 生成摘要后，追加写入：{summary_path}
 """
-        summary_result = await call_subagent("chapter-summarizer", summary_task)
+        summary_result = await call_subagent("chapter-summarizer", summary_task, parent_model=model_name)
         results["chapter_summary"] = summary_result
     except Exception as e:
         logger.error(f"Chapter summarizer failed: {e}")
@@ -220,7 +224,7 @@ async def post_process(state: NovelWorkflowState) -> dict[str, Any]:
 
 更新状态文件：{state_path}
 """
-        await call_subagent("state-settler", state_task)
+        await call_subagent("state-settler", state_task, parent_model=model_name)
         results["state_updated"] = True
     except Exception as e:
         logger.error(f"State settler failed: {e}")
@@ -233,7 +237,7 @@ async def post_process(state: NovelWorkflowState) -> dict[str, Any]:
 
 {injection_note}{chapter_section}
 """
-        await call_subagent("hook-manager", hook_task)
+        await call_subagent("hook-manager", hook_task, parent_model=model_name)
         results["hooks_updated"] = True
     except Exception as e:
         logger.error(f"Hook manager failed: {e}")
@@ -246,7 +250,7 @@ async def post_process(state: NovelWorkflowState) -> dict[str, Any]:
 
 {injection_note}{chapter_section}
 """
-        await call_subagent("card-manager", card_task)
+        await call_subagent("card-manager", card_task, parent_model=model_name)
         results["card_updated"] = True
     except Exception as e:
         logger.error(f"Card manager failed: {e}")
@@ -258,6 +262,7 @@ async def sync_outline(state: NovelWorkflowState) -> dict[str, Any]:
     novel_name = state.get("novel_name", "")
     chapter_num = state.get("chapter_num", 0)
     thread_id = state.get("thread_id")
+    model_name = state.get("model_name")
 
     logger.info(f"Writing workflow: syncing outline for chapter {chapter_num}")
 
@@ -293,7 +298,7 @@ async def sync_outline(state: NovelWorkflowState) -> dict[str, Any]:
 """
 
     try:
-        await call_subagent("outline-planner", task)
+        await call_subagent("outline-planner", task, parent_model=model_name)
         return {"outline_synced": True}
     except Exception as e:
         logger.error(f"Sync outline failed: {e}")

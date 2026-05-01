@@ -84,15 +84,9 @@ async def call_subagent(
 
     config.skills = []
 
-    # Use default model if parent_model not specified
-    logger.info(f"[CALL_SUBAGENT_DEBUG] parent_model before fallback: {parent_model}")
+    logger.info(f"[CALL_SUBAGENT_DEBUG] parent_model: {parent_model}")
     if parent_model is None:
-        app_config = get_app_config()
-        if app_config.models:
-            parent_model = app_config.models[0].name
-            logger.info(f"[CALL_SUBAGENT_DEBUG] Using fallback model: {parent_model}")
-
-    logger.info(f"[CALL_SUBAGENT_DEBUG] Final parent_model: {parent_model}")
+        raise ValueError("parent_model is required but was not provided. Make sure model_name is passed from the workflow state.")
     tools = get_available_tools(model_name=parent_model, subagent_enabled=False)
 
     executor = SubagentExecutor(

@@ -102,16 +102,10 @@ async def workflow_tool(
     params["thread_id"] = thread_id
 
     # Get the model name from runtime metadata (same as task_tool)
-    import logging
-    logger = logging.getLogger(__name__)
-    
     metadata = runtime.config.get("metadata", {}) if runtime.config else {}
     parent_model = metadata.get("model_name")
     
-    # Debug logging
-    logger.info(f"[WORKFLOW_DEBUG] runtime.config: {runtime.config}")
-    logger.info(f"[WORKFLOW_DEBUG] metadata: {metadata}")
-    logger.info(f"[WORKFLOW_DEBUG] parent_model: {parent_model}")
+    logger.info(f"[WORKFLOW_TOOL] Called workflow={workflow_name} model_name={parent_model}")
     
     if parent_model:
         params["model_name"] = parent_model

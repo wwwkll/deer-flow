@@ -57,10 +57,14 @@ class WorkflowExecutor:
         result.status = WorkflowStatus.RUNNING
         result.started_at = datetime.now()
 
+        logger.info(f"[WORKFLOW_EXECUTOR] Executing workflow={self.workflow_name} params_keys={list(params.keys())} model_name={params.get('model_name')}")
+
         try:
             workflow = self.workflow_factory()
             self._validate_params(params)
             initial_state = self._build_initial_state(params)
+
+            logger.info(f"[WORKFLOW_EXECUTOR] Initial state keys={list(initial_state.keys())} model_name={initial_state.get('model_name')}")
 
             final_state = None
             config = {"recursion_limit": 100}
