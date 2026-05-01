@@ -6,11 +6,21 @@ from typing import Any
 
 from langgraph.graph import END, StateGraph
 
+from deerflow.config import get_app_config
 from deerflow.workflows.helpers import call_subagent, get_novel_base, normalize_chapter_group, read_file_safe
 from deerflow.workflows.registry import register_workflow
 from deerflow.workflows.states import NovelWorkflowState
 
 logger = logging.getLogger(__name__)
+
+
+def _is_parallel_enabled() -> bool:
+    """Check if workflow parallel execution is enabled from config."""
+    try:
+        config = get_app_config()
+        return config.subagents.workflow_parallel_enabled
+    except Exception:
+        return True
 
 
 def confirm_chapter(state: NovelWorkflowState) -> dict[str, Any]:
@@ -66,9 +76,10 @@ async def organize_world(state: NovelWorkflowState) -> dict[str, Any]:
 
     def _inject(label: str, path: str) -> str:
         content = read_file_safe(path)
+        rel_path = path.replace(novel_base + "/", "") if novel_base else path
         if content:
-            return f"## {label}（已注入，不要再用read_file读取）\n\n{content}\n"
-        return f"## {label}\n路径：{path}\n[未成功注入，请用read_file自行读取]\n"
+            return f"## {label}（【已注入】{rel_path} —— 严禁使用read_file重复读取，内容已完整提供）\n\n{content}\n"
+        return f"## {label}\n路径：{path}（相对路径：{rel_path}）\n[未成功注入，请用read_file自行读取]\n"
 
     sections = _inject("小说名片", card_path)
     sections += _inject("当前状态", state_path)
@@ -77,8 +88,9 @@ async def organize_world(state: NovelWorkflowState) -> dict[str, Any]:
 
     task = f"""你的任务是整理第{chapter_num}章的世界观参考。
 
-以下参考内容已为你注入，标注"已注入"的不要用read_file重复读取，因为上下文有限。
-标注"未成功注入"的，请用read_file按路径自行读取。
+【重要提示】以下内容已直接注入到你的上下文中：
+- 标注"【已注入】"的文件，内容已完整提供，严禁使用read_file工具重复读取，否则将严重浪费上下文窗口
+- 标注"[未成功注入]"的文件，请按提供的路径使用read_file自行读取
 
 {sections}
 
@@ -115,9 +127,10 @@ async def organize_characters(state: NovelWorkflowState) -> dict[str, Any]:
 
     def _inject(label: str, path: str) -> str:
         content = read_file_safe(path)
+        rel_path = path.replace(novel_base + "/", "") if novel_base else path
         if content:
-            return f"## {label}（已注入，不要再用read_file读取）\n\n{content}\n"
-        return f"## {label}\n路径：{path}\n[未成功注入，请用read_file自行读取]\n"
+            return f"## {label}（【已注入】{rel_path} —— 严禁使用read_file重复读取，内容已完整提供）\n\n{content}\n"
+        return f"## {label}\n路径：{path}（相对路径：{rel_path}）\n[未成功注入，请用read_file自行读取]\n"
 
     sections = _inject("小说名片", card_path)
     sections += _inject("当前状态", state_path)
@@ -126,8 +139,9 @@ async def organize_characters(state: NovelWorkflowState) -> dict[str, Any]:
 
     task = f"""你的任务是整理第{chapter_num}章的人物参考。
 
-以下参考内容已为你注入，标注"已注入"的不要用read_file重复读取，因为上下文有限。
-标注"未成功注入"的，请用read_file按路径自行读取。
+【重要提示】以下内容已直接注入到你的上下文中：
+- 标注"【已注入】"的文件，内容已完整提供，严禁使用read_file工具重复读取，否则将严重浪费上下文窗口
+- 标注"[未成功注入]"的文件，请按提供的路径使用read_file自行读取
 
 {sections}
 
@@ -164,9 +178,10 @@ async def organize_items(state: NovelWorkflowState) -> dict[str, Any]:
 
     def _inject(label: str, path: str) -> str:
         content = read_file_safe(path)
+        rel_path = path.replace(novel_base + "/", "") if novel_base else path
         if content:
-            return f"## {label}（已注入，不要再用read_file读取）\n\n{content}\n"
-        return f"## {label}\n路径：{path}\n[未成功注入，请用read_file自行读取]\n"
+            return f"## {label}（【已注入】{rel_path} —— 严禁使用read_file重复读取，内容已完整提供）\n\n{content}\n"
+        return f"## {label}\n路径：{path}（相对路径：{rel_path}）\n[未成功注入，请用read_file自行读取]\n"
 
     sections = _inject("小说名片", card_path)
     sections += _inject("当前状态", state_path)
@@ -175,8 +190,9 @@ async def organize_items(state: NovelWorkflowState) -> dict[str, Any]:
 
     task = f"""你的任务是整理第{chapter_num}章的道具和技能参考。
 
-以下参考内容已为你注入，标注"已注入"的不要用read_file重复读取，因为上下文有限。
-标注"未成功注入"的，请用read_file按路径自行读取。
+【重要提示】以下内容已直接注入到你的上下文中：
+- 标注"【已注入】"的文件，内容已完整提供，严禁使用read_file工具重复读取，否则将严重浪费上下文窗口
+- 标注"[未成功注入]"的文件，请按提供的路径使用read_file自行读取
 
 {sections}
 
@@ -211,10 +227,11 @@ async def organize_storyline(state: NovelWorkflowState) -> dict[str, Any]:
         for fname in outline_files:
             fpath = f"{chapters_dir}/{fname}"
             content = read_file_safe(fpath)
+            rel_path = fpath.replace(novel_base + "/", "") if novel_base else fpath
             if content:
-                outline_sections.append(f"## {fname}（已注入，不要再用read_file读取）\n\n{content}\n")
+                outline_sections.append(f"## {fname}（【已注入】{rel_path} —— 严禁使用read_file重复读取，内容已完整提供）\n\n{content}\n")
             else:
-                outline_sections.append(f"## {fname}\n路径：{fpath}\n[未成功注入，请用read_file自行读取]\n")
+                outline_sections.append(f"## {fname}\n路径：{fpath}（相对路径：{rel_path}）\n[未成功注入，请用read_file自行读取]\n")
     except Exception as e:
         logger.warning(f"Failed to scan chapters dir: {e}")
         outline_sections = []
@@ -226,9 +243,10 @@ async def organize_storyline(state: NovelWorkflowState) -> dict[str, Any]:
 
     def _inject(label: str, path: str) -> str:
         content = read_file_safe(path)
+        rel_path = path.replace(novel_base + "/", "") if novel_base else path
         if content:
-            return f"## {label}（已注入，不要再用read_file读取）\n\n{content}\n"
-        return f"## {label}\n路径：{path}\n[未成功注入，请用read_file自行读取]\n"
+            return f"## {label}（【已注入】{rel_path} —— 严禁使用read_file重复读取，内容已完整提供）\n\n{content}\n"
+        return f"## {label}\n路径：{path}（相对路径：{rel_path}）\n[未成功注入，请用read_file自行读取]\n"
 
     sections = _inject("小说名片", card_path)
     sections += _inject("当前状态", state_path)
@@ -236,8 +254,9 @@ async def organize_storyline(state: NovelWorkflowState) -> dict[str, Any]:
 
     task = f"""你的任务是整理第{chapter_num}章的故事线参考。
 
-以下参考内容已为你注入，标注"已注入"的不要用read_file重复读取，因为上下文有限。
-标注"未成功注入"的，请用read_file按路径自行读取。
+【重要提示】以下内容已直接注入到你的上下文中：
+- 标注"【已注入】"的文件，内容已完整提供，严禁使用read_file工具重复读取，否则将严重浪费上下文窗口
+- 标注"[未成功注入]"的文件，请按提供的路径使用read_file自行读取
 
 {sections}
 
@@ -322,7 +341,42 @@ async def assemble_context(state: NovelWorkflowState) -> dict[str, Any]:
     return {"writing_task_summary": "\n".join(summaries)}
 
 
-def create_organize_workflow() -> StateGraph:
+def _create_parallel_workflow() -> StateGraph:
+    """Create organize workflow with parallel execution for organize nodes."""
+    from langgraph.constants import Send
+
+    workflow = StateGraph(NovelWorkflowState)
+
+    workflow.add_node("confirm_chapter", confirm_chapter)
+    workflow.add_node("create_task_folder", create_task_folder)
+    workflow.add_node("organize_world", organize_world)
+    workflow.add_node("organize_characters", organize_characters)
+    workflow.add_node("organize_items", organize_items)
+    workflow.add_node("organize_storyline", organize_storyline)
+    workflow.add_node("assemble_context", assemble_context)
+
+    workflow.set_entry_point("confirm_chapter")
+    workflow.add_edge("confirm_chapter", "create_task_folder")
+    workflow.add_edge("create_task_folder", "assemble_context")
+
+    # Parallel organize nodes - all start after create_task_folder
+    def start_organize_parallel(state: NovelWorkflowState) -> list[Send]:
+        return [
+            Send("organize_world", state),
+            Send("organize_characters", state),
+            Send("organize_items", state),
+            Send("organize_storyline", state),
+        ]
+
+    workflow.add_conditional_edges("create_task_folder", start_organize_parallel)
+    workflow.add_edge(["organize_world", "organize_characters", "organize_items", "organize_storyline"], "assemble_context")
+    workflow.add_edge("assemble_context", END)
+
+    return workflow.compile()
+
+
+def _create_sequential_workflow() -> StateGraph:
+    """Create organize workflow with sequential execution."""
     workflow = StateGraph(NovelWorkflowState)
 
     workflow.add_node("confirm_chapter", confirm_chapter)
@@ -343,6 +397,15 @@ def create_organize_workflow() -> StateGraph:
     workflow.add_edge("assemble_context", END)
 
     return workflow.compile()
+
+
+def create_organize_workflow() -> StateGraph:
+    if _is_parallel_enabled():
+        logger.info("Organize workflow: using parallel execution mode")
+        return _create_parallel_workflow()
+    else:
+        logger.info("Organize workflow: using sequential execution mode")
+        return _create_sequential_workflow()
 
 
 register_workflow("organize", create_organize_workflow)

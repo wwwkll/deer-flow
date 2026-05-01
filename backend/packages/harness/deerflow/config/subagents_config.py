@@ -81,6 +81,10 @@ class SubagentsAppConfig(BaseModel):
         ge=1,
         description="Optional default max-turn override for all subagents (None = keep builtin defaults)",
     )
+    workflow_parallel_enabled: bool = Field(
+        default=True,
+        description="Whether to run workflow nodes in parallel (true=parallel, false=sequential). Set to false for local models that don't support concurrent requests.",
+    )
     agents: dict[str, SubagentOverrideConfig] = Field(
         default_factory=dict,
         description="Per-agent configuration overrides keyed by agent name",

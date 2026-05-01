@@ -264,6 +264,10 @@ skill_evolution:
 subagents:
   timeout_seconds: 900
   max_turns: 50
+  # 工作流并行执行开关
+  # true:  并行执行（适合线上模型，支持并发请求）
+  # false: 串行执行（适合本地模型，避免并发导致的问题）
+  workflow_parallel_enabled: true
 
   agents:
     general-purpose:
