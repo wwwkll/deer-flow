@@ -6,7 +6,7 @@ from typing import Any
 
 from langgraph.graph import END, StateGraph
 
-from deerflow.config import get_app_config
+from deerflow.config.subagents_config import get_subagents_app_config
 from deerflow.workflows.helpers import call_subagent, get_novel_base, normalize_chapter_group, read_file_safe
 from deerflow.workflows.registry import register_workflow
 from deerflow.workflows.states import NovelWorkflowState
@@ -17,8 +17,8 @@ logger = logging.getLogger(__name__)
 def _is_parallel_enabled() -> bool:
     """Check if workflow parallel execution is enabled from config."""
     try:
-        config = get_app_config()
-        return config.subagents.workflow_parallel_enabled
+        config = get_subagents_app_config()
+        return config.workflow_parallel_enabled
     except Exception:
         return True
 
