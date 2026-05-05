@@ -1,0 +1,10 @@
+name: hook-manager
+description: |
+  伏笔管理器，负责管理伏笔池状态。
+  维护待办事项，处理伏笔的创建、推进、解决和检测。
+model: null
+tool_groups:
+  - file:read
+  - file:write
+subagent_enabled: false
+max_concurrent_subagents: 0

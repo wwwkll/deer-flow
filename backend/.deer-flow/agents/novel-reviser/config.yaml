@@ -1,0 +1,10 @@
+name: novel-reviser
+description: |
+  修稿编辑，负责根据审计报告修改小说正文。
+  支持润色、改写、重写、反AI检测、定点修复等多种修稿模式。
+model: null
+tool_groups:
+  - file:read
+  - file:write
+subagent_enabled: false
+max_concurrent_subagents: 0

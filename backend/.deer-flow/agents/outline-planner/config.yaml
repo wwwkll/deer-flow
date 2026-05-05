@@ -1,0 +1,10 @@
+name: outline-planner
+description: |
+  细纲规划师，负责编写或修改章节细纲（每5章一组）。
+  支持新建、修改、同步三种模式。
+model: null
+tool_groups:
+  - file:read
+  - file:write
+subagent_enabled: false
+max_concurrent_subagents: 0

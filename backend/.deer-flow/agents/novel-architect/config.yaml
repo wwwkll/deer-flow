@@ -1,0 +1,10 @@
+name: novel-architect
+description: |
+  小说架构师，负责新建小说时生成完整基础设定。
+  包括世界观、卷纲、规则、计划、初始状态、伏笔池。
+model: null
+tool_groups:
+  - file:read
+  - file:write
+subagent_enabled: false
+max_concurrent_subagents: 0

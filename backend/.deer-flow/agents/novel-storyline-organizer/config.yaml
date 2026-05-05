@@ -1,0 +1,10 @@
+name: novel-storyline-organizer
+description: |
+  故事线整理员，负责在写作前整理往期剧情线。
+  从所有章节细纲中提取并缩写主要剧情，生成故事线参考。
+model: null
+tool_groups:
+  - file:read
+  - file:write
+subagent_enabled: false
+max_concurrent_subagents: 0

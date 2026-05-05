@@ -1,0 +1,15 @@
+name: novel-master
+description: |
+  小说创作系统主控Agent，负责协调所有子Agent完成小说创作任务。
+  接收用户指令，判断任务类型，调用合适的子Agent，管理整个创作流程。
+model: null
+tool_groups:
+  - file:read
+  - master:write # 创建文件目录、更新状态文件
+  - novel:tools # 维护card.md
+skills:
+  - novel-post-write-validator
+  - novel-anti-ai-detector
+  - novel-plan-compliance
+subagent_enabled: true
+max_concurrent_subagents: 3

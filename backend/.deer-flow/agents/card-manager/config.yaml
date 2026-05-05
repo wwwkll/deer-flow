@@ -1,0 +1,10 @@
+name: card-manager
+description: |
+  名片管理器，负责更新小说名片（card.json）。
+  管理进度、字数、状态等结构化数据。
+model: null
+tool_groups:
+  - file:read
+  - file:write
+subagent_enabled: false
+max_concurrent_subagents: 0

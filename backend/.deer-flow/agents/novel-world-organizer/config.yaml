@@ -1,0 +1,10 @@
+name: novel-world-organizer
+description: |
+  世界观整理员，负责在写作前整理当前章节需要的世界观设定。
+  从故事圣经提取相关世界背景、力量体系等。
+model: null
+tool_groups:
+  - file:read
+  - file:write
+subagent_enabled: false
+max_concurrent_subagents: 0

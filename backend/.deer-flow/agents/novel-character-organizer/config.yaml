@@ -1,0 +1,10 @@
+name: novel-character-organizer
+description: |
+  人物整理员，负责在写作前整理当前章节出场的人物信息。
+  从角色矩阵和当前状态卡提取相关人物档案。
+model: null
+tool_groups:
+  - file:read
+  - file:write
+subagent_enabled: false
+max_concurrent_subagents: 0

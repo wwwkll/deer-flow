@@ -1,0 +1,9 @@
+name: volume-planner
+description: |
+  卷纲规划师，负责编写或修改全书卷纲（分卷概览 + 章节分组规划）。
+model: null
+tool_groups:
+  - file:read
+  - file:write
+subagent_enabled: false
+max_concurrent_subagents: 0

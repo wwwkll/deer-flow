@@ -1,0 +1,10 @@
+name: chapter-summarizer
+description: |
+  章节总结员，负责从小说正文生成章节摘要。
+  生成100字以内的摘要，追加到章节摘要汇总。
+model: null
+tool_groups:
+  - file:read
+  - file:write
+subagent_enabled: false
+max_concurrent_subagents: 0
