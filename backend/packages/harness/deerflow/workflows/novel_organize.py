@@ -10,6 +10,7 @@ from deerflow.config.subagents_config import get_subagents_app_config
 from deerflow.workflows.helpers import call_subagent, get_novel_base, normalize_chapter_group, read_file_safe
 from deerflow.workflows.registry import register_workflow
 from deerflow.workflows.states import NovelWorkflowState
+from my_tools.path_resolver import set_current_thread_id
 
 logger = logging.getLogger(__name__)
 
@@ -24,6 +25,8 @@ def _is_parallel_enabled() -> bool:
 
 
 def confirm_chapter(state: NovelWorkflowState) -> dict[str, Any]:
+    set_current_thread_id(state.get("thread_id"))
+
     novel_name = state.get("novel_name", "")
     chapter_num = state.get("chapter_num", 0)
     chapter_group = state.get("chapter_group", "")

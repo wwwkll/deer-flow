@@ -48,6 +48,8 @@ tool_groups:
   - name: file:read
   - name: file:write
   - name: bash
+  - name: master:write
+  - name: novel:reader
 
 # ============================================================================
 # Tools Configuration
@@ -158,6 +160,18 @@ tools:
     group: bash
     use: deerflow.sandbox.tools:bash_tool
 
+  # Novel Master Writer Tool (restricted whitelist)
+  # 只允许创建目录和写入 03-状态 目录下的文件
+  - name: master_writer
+    group: master:write
+    use: my_tools.master_writer:master_writer
+
+  # Novel Reader Tool (restricted whitelist)
+  # 只允许读取 _task/、05-参考/、02-正文/ 目录下的文件
+  - name: novel_reader
+    group: novel:reader
+    use: my_tools.novel_reader:novel_reader
+
 # ============================================================================
 # Tool Search Configuration (Deferred Tool Loading)
 # ============================================================================
@@ -177,7 +191,11 @@ sandbox:
   use: deerflow.sandbox.local:LocalSandboxProvider
   allow_host_bash: false
   mounts:
-    - host_path: backend/.deer-flow/shared-data
+    # 共享目录配置
+    # 重要：host_path 必须配置在项目目录之外（如 E:\xiangmu\deer-flow-data\shared-data）
+    # 否则 Agent 在共享目录中创建/修改文件时，会触发 uvicorn --reload 机制导致服务重启
+    # 支持绝对路径或相对于项目根目录的相对路径
+    - host_path: E:\xiangmu\deer-flow-data\shared-data
       container_path: /mnt/shared-data
       read_only: false
   bash_output_max_chars: 20000
@@ -280,289 +298,3 @@ subagents:
 checkpointer:
   type: sqlite
   connection_string: checkpoints.db
-
-# ============================================================================
-# 二开配置：小说写作系统
-# ============================================================================
-# 使用说明：
-#   1. 将下方配置中需要启用的部分取消注释
-#   2. 按需修改参数值
-#   3. 重启服务生效
-# ============================================================================
-
-# --- ① Tool Groups ---
-# tool_groups:
-#   - name: novel
-
-# --- ② Tools ---
-# tools:
-#   - name: context_assembler
-#     group: novel
-#     use: my_tools.context_assembler:context_assembler
-#
-#   - name: post_write_validator
-#     group: novel
-#     use: my_tools.post_write_validator:post_write_validator
-#
-#   - name: ai_trace_detector
-#     group: novel
-#     use: my_tools.ai_trace_detector:ai_trace_detector
-#
-#   - name: card_validator
-#     group: novel
-#     use: my_tools.card_validator:card_validator
-
-# --- ③ Skills ---
-# Skills 位于 skills/custom/ 目录，通过 skills.path 自动扫描加载
-# 现有技能：
-#   - novel-post-write-validator   写作后格式验证
-#   - novel-anti-ai-detector       AI 痕迹检测与消除
-#   - novel-plan-compliance        规划合规检查
-
-# --- ④ Subagents ---
-# subagents:
-#   timeout_seconds: 900
-#   max_turns: 50
-#
-#   agents:
-#     novel-architect:
-#       timeout_seconds: 1800
-#       max_turns: 80
-#     novel-writer:
-#       timeout_seconds: 1800
-#       max_turns: 80
-#     novel-reviser:
-#       timeout_seconds: 1800
-#       max_turns: 80
-#     continuity-auditor:
-#       timeout_seconds: 1200
-#       max_turns: 60
-#
-#   custom_agents:
-#     novel-architect:
-#       description: |
-#         小说架构师，负责新建小说时生成完整基础设定。
-#       system_prompt: |
-#         你是小说创作系统的架构师，专门负责新建小说时生成完整的基础架构设定。
-#         ## 职责：世界观构建、卷纲规划、规则制定、创作计划、初始状态
-#         ## 输出文件：故事圣经.md、卷纲.md、本书规则.json、创作计划.md、当前状态卡.md、待办事项.md
-#       tools:
-#         - read_file
-#         - write_file
-#         - glob
-#       model: inherit
-#       max_turns: 80
-#       timeout_seconds: 1800
-#
-#     volume-planner:
-#       description: 卷纲规划师，负责编写或修改全书卷纲
-#       system_prompt: |
-#         你是小说创作系统的卷纲规划师。
-#         ## 职责：新建卷纲、修改卷纲、一致性维护、章节分组
-#       tools:
-#         - read_file
-#         - write_file
-#         - str_replace
-#       model: inherit
-#       max_turns: 60
-#       timeout_seconds: 1200
-#
-#     outline-planner:
-#       description: 细纲规划师，负责编写或修改章节细纲（每5章一组）
-#       system_prompt: |
-#         你是小说创作系统的细纲规划师。
-#         ## 工作模式：new（新建）、revise（修改）、sync（同步）
-#       tools:
-#         - read_file
-#         - write_file
-#         - str_replace
-#       model: inherit
-#       max_turns: 60
-#       timeout_seconds: 1200
-#
-#     book-rules-manager:
-#       description: 本书规则管理器，负责管理 本书规则.json
-#       system_prompt: |
-#         你是小说创作系统的规则管理器。
-#         ## 规则类别：hard_rules、style_guidelines、constraints、banned_words
-#       tools:
-#         - read_file
-#         - str_replace
-#       model: inherit
-#       max_turns: 40
-#       timeout_seconds: 600
-#
-#     novel-world-organizer:
-#       description: 世界观整理员
-#       system_prompt: |
-#         你是小说创作系统的世界观整理员。
-#       tools:
-#         - read_file
-#         - write_file
-#       model: inherit
-#       max_turns: 40
-#       timeout_seconds: 600
-#
-#     novel-character-organizer:
-#       description: 人物整理员
-#       system_prompt: |
-#         你是小说创作系统的人物整理员。
-#       tools:
-#         - read_file
-#         - write_file
-#       model: inherit
-#       max_turns: 40
-#       timeout_seconds: 600
-#
-#     novel-item-organizer:
-#       description: 道具整理员
-#       system_prompt: |
-#         你是小说创作系统的道具整理员。
-#       tools:
-#         - read_file
-#         - write_file
-#       model: inherit
-#       max_turns: 40
-#       timeout_seconds: 600
-#
-#     novel-storyline-organizer:
-#       description: 故事线整理员
-#       system_prompt: |
-#         你是小说创作系统的故事线整理员。
-#         ## 职责：整理往期剧情线，从所有章节大纲中提取并缩写主要剧情，生成故事线参考。
-#         ## 输出：_task/故事线参考.md
-#         ## 规则：保留重要承接点、转折点、数值/系统面板/天赋/物资相关内容，近期章节重点总结。
-#       tools:
-#         - read_file
-#         - write_file
-#       model: inherit
-#       max_turns: 60
-#       timeout_seconds: 1200
-#
-#     novel-writer:
-#       description: 长篇网文写手
-#       system_prompt: |
-#         你是一个专业的长篇网文写手。
-#         ## 写作风格：口语化对白、强情绪强冲突、长短句结合
-#         ## 写作要求：冲突升级、对话占比30%、1600字以上
-#         ## 输出规则：纯正文、无Markdown格式、无章节标题
-#       tools:
-#         - read_file
-#         - write_file
-#       model: inherit
-#       max_turns: 80
-#       timeout_seconds: 1800
-#
-#     continuity-auditor:
-#       description: 连续性审计师
-#       system_prompt: |
-#         你是小说创作系统的连续性审计师。
-#         ## 审计维度：角色一致性、世界观一致性、叙事连贯性、伏笔管理、写作质量、AI痕迹检测
-#       tools:
-#         - read_file
-#         - write_file
-#       model: inherit
-#       max_turns: 60
-#       timeout_seconds: 1200
-#
-#     novel-reviser:
-#       description: 修稿编辑
-#       system_prompt: |
-#         你是小说创作系统的修稿编辑。
-#         ## 修稿模式：polish、rewrite、rework、anti-detect、spot-fix
-#       tools:
-#         - read_file
-#         - write_file
-#         - str_replace
-#       model: inherit
-#       max_turns: 80
-#       timeout_seconds: 1800
-#
-#     state-settler:
-#       description: 结算器
-#       system_prompt: |
-#         你是小说创作系统的结算器。
-#       tools:
-#         - read_file
-#         - write_file
-#         - str_replace
-#       model: inherit
-#       max_turns: 60
-#       timeout_seconds: 1200
-#
-#     chapter-summarizer:
-#       description: 章节总结员
-#       system_prompt: |
-#         你是小说创作系统的章节总结助理。
-#       tools:
-#         - read_file
-#         - write_file
-#       model: inherit
-#       max_turns: 40
-#       timeout_seconds: 600
-#
-#     card-manager:
-#       description: 名片管理器
-#       system_prompt: |
-#         你是小说创作系统的名片管理助理。
-#       tools:
-#         - read_file
-#         - str_replace
-#       model: inherit
-#       max_turns: 40
-#       timeout_seconds: 600
-#
-#     hook-manager:
-#       description: 伏笔管理器
-#       system_prompt: |
-#         你是小说创作系统的伏笔管理助理。
-#         ## 伏笔状态：open、progressing、resolved
-#       tools:
-#         - read_file
-#         - str_replace
-#       model: inherit
-#       max_turns: 40
-#       timeout_seconds: 600
-#
-# ============================================================================
-# ⑤ Workflows Configuration (工作流配置)
-# ============================================================================
-# 工作流是确定性的任务编排，不依赖 LLM 决策，保证流程完整执行。
-# 主 Agent 通过 workflow 工具调用工作流。
-#
-# 内置工作流：
-#   - organize:     整理工作流（步骤1-4，包含并行整理）
-#   - writing:      写作工作流（写作-审核-修改，最多审核2次）
-#   - post_process: 后处理工作流（摘要+状态+伏笔+名片+同步细纲）
-#
-# 工作流不是 Agent，也不是 Skill：
-#   - Agent: 独立 LLM 会话，LLM 自主决策
-#   - Skill: 提示词模板，自动注入上下文
-#   - Workflow: 确定性编排，代码预定义，无 LLM 决策
-#
-# 工作流内部通过 call_subagent() 调用子 Agent，使用 custom_agents 中的配置。
-# 子 Agent 的 system_prompt 支持 {{xxx}} 全局变量替换。
-#
-# 审核判断机制：
-#   工作流要求 continuity-auditor 在报告末尾输出结构化标记：
-#   - [AUDIT_RESULT: PASS] 审核通过
-#   - [AUDIT_RESULT: FAIL] 审核不通过
-#   脚本解析标记，不依赖关键词匹配。
-#
-# 使用示例（在 SOUL.md 中）：
-#   调用 workflow 工具：
-#   - workflow_name: "organize"
-#   - params: {"novel_name": "xxx", "chapter_num": 6, "chapter_group": "06-10"}
-#   - description: "整理第6章参考信息"
-#
-# 工作流文件位置：
-#   backend/packages/harness/deerflow/workflows/
-#   ├── __init__.py
-#   ├── states.py           状态类型定义
-#   ├── registry.py         工作流注册表
-#   ├── executor.py         工作流执行引擎
-#   ├── helpers.py          辅助函数（调用子Agent）
-#   ├── novel_organize.py      整理工作流
-#   ├── novel_writing.py       写作工作流
-#   └── novel_post_process.py  后处理工作流
-# ============================================================================

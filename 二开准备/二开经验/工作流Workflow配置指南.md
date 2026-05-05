@@ -84,19 +84,27 @@ confirm_chapter → create_task_folder → organize_world ──┐
 
 **流程**：
 ```
-write_chapter → audit → [AUDIT_RESULT: PASS] → post_process → sync_outline
-                    → [AUDIT_RESULT: FAIL] → revise → audit (最多2次)
+check_task_summary → [通过] → write_chapter → audit → [AUDIT_RESULT: PASS] → post_process → sync_outline
+                   → [失败] → END（返回错误信息给主Agent）
+                                                          → [AUDIT_RESULT: FAIL] → revise → audit (最多2次)
 ```
 
 **节点说明**：
 
 | 节点 | 功能 | 调用的子Agent |
 |------|------|---------------|
+| check_task_summary | 检查写作任务汇总是否已生成 | 无（纯逻辑检查） |
 | write_chapter | 写章节正文 | novel-writer |
 | audit | 审核章节 | continuity-auditor |
 | revise | 修改章节 | novel-reviser |
 | post_process | 后处理（摘要+状态+伏笔+名片） | chapter-summarizer, state-settler, hook-manager, card-manager |
 | sync_outline | 同步细纲 | outline-planner |
+
+**check_task_summary 说明**：
+- 工作流入口节点，首先检查 `_task/写作任务汇总.md` 是否存在
+- 如果 state 中已有 `writing_task_summary` 内容（通过参数注入），则跳过文件检查
+- 如果文件不存在，工作流直接终止，返回错误信息给主 Agent
+- 错误信息格式：`工作流运行失败，未检测到 {目录结构}/写作任务汇总.md 文件，请运行整理工作流重新生成`
 
 **审核判断机制**：
 

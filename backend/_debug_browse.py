@@ -1,43 +1,51 @@
 import sys
+from pathlib import Path
 
 sys.path.insert(0, r"c:\xiangmu\deer-flow\backend")
 sys.path.insert(0, r"c:\xiangmu\deer-flow\backend\packages\harness")
 
 
+from deerflow.config.app_config import get_app_config
 from deerflow.config.paths import get_paths
 
 base_dir = get_paths().base_dir
 print(f"base_dir: {base_dir}")
 
-project_root = base_dir.parent.parent
-print(f"project_root: {project_root}")
+# Get mount host_path from config
+config = get_app_config()
+mounts = config.sandbox.mounts if config and config.sandbox else []
+for mount in mounts:
+    host_path = Path(mount.host_path)
+    if not host_path.is_absolute():
+        project_root = base_dir.parent.parent
+        host_path = (project_root / host_path).resolve()
+    print(f"mount container_path: {mount.container_path}")
+    print(f"mount host_path: {host_path}")
+    print(f"exists: {host_path.exists()}")
 
-host_path = (project_root / "backend/.deer-flow/shared-data").resolve()
-print(f"mount host_path: {host_path}")
-print(f"exists: {host_path.exists()}")
-
-virtual_path = "/mnt/shared-data/novels/book/测试小说"
-container_path = "/mnt/shared-data"
-relative = virtual_path[len(container_path) :].lstrip("/")
-print(f"relative: {relative}")
-
-actual = (host_path / relative).resolve()
-print(f"actual: {actual}")
-print(f"exists: {actual.exists()}")
-if actual.exists():
-    print(f"is_dir: {actual.is_dir()}")
-    if actual.is_dir():
-        entries = []
-        for item in actual.iterdir():
-            if item.name.startswith("."):
-                continue
-            entries.append(
-                {
-                    "name": item.name,
-                    "path": f"{virtual_path}/{item.name}",
-                    "isDirectory": item.is_dir(),
-                }
-            )
-        print(f"entries ({len(entries)}):")
-        for e in entries[:5]:
-            print(f"  {e}")
+    # Test path mapping
+    virtual_path = "/mnt/shared-data/book/测试小说"
+    container_path = mount.container_path.rstrip("/")
+    if virtual_path.startswith(container_path):
+        relative = virtual_path[len(container_path):].lstrip("/")
+        actual = (host_path / relative).resolve()
+        print(f"virtual_path: {virtual_path}")
+        print(f"actual host_path: {actual}")
+        print(f"exists: {actual.exists()}")
+        if actual.exists():
+            print(f"is_dir: {actual.is_dir()}")
+            if actual.is_dir():
+                entries = []
+                for item in actual.iterdir():
+                    if item.name.startswith("."):
+                        continue
+                    entries.append(
+                        {
+                            "name": item.name,
+                            "path": f"{virtual_path}/{item.name}",
+                            "isDirectory": item.is_dir(),
+                        }
+                    )
+                print(f"entries ({len(entries)}):")
+                for e in entries[:5]:
+                    print(f"  {e}")

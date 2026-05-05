@@ -1,4 +1,20 @@
+import sys
 import sqlite3
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).parent / "packages" / "harness"))
+
+from deerflow.config.app_config import get_app_config
+
+def _get_workdir_from_config():
+    try:
+        config = get_app_config()
+        mounts = config.sandbox.mounts if config and config.sandbox else []
+        if mounts:
+            return mounts[0].container_path
+    except Exception:
+        pass
+    return "/mnt/shared-data"
 
 db_path = r"c:\xiangmu\deer-flow\backend\.deer-flow\global_variables.db"
 conn = sqlite3.connect(db_path)
@@ -34,7 +50,7 @@ for k, v in variables.items():
 
 SYSTEM_VARIABLES = {
     "workdir": {
-        "value": "/mnt/shared-data",
+        "value": _get_workdir_from_config(),
         "description": "Shared workspace directory",
         "is_system": True,
         "llm_editable": False,

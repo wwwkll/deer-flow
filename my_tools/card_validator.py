@@ -3,6 +3,8 @@ import json
 import os
 from typing import Optional
 
+from my_tools.path_resolver import resolve_to_host_path
+
 
 @tool("card_validator")
 def card_validator(
@@ -17,7 +19,7 @@ def card_validator(
     """验证并规范化 card.json 文件格式。
 
     Args:
-        card_path: card.json 文件路径
+        card_path: card.json 文件路径（支持沙箱路径如 /mnt/shared-data/...）
         fix: 是否自动修复格式问题（默认True）
         auto_create: 如果文件不存在是否自动创建（默认False）
         book_name: 自动创建时的书名
@@ -28,6 +30,7 @@ def card_validator(
     Returns:
         验证结果报告（包含是否通过、问题列表、修复后的内容）
     """
+    card_path = resolve_to_host_path(card_path)
     card_path = card_path.replace("\\", "/")
     
     # 定义必填字段和类型

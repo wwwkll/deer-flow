@@ -105,6 +105,8 @@ DeerFlow 是一个开源的 super agent harness，本项目在其基础上二开
 | post_write_validator | 写作后格式验证，检查正文格式是否符合规范 | [my_tools/post_write_validator.py](my_tools/post_write_validator.py) |
 | ai_trace_detector | AI 痕迹检测，检测并分析正文中的 AI 写作特征 | [my_tools/ai_trace_detector.py](my_tools/ai_trace_detector.py) |
 | card_validator | card.json 格式验证，验证并规范化小说名片格式 | [my_tools/card_validator.py](my_tools/card_validator.py) |
+| master_writer | 小说主控专用写入工具（受限白名单），只允许创建目录和写入 03-状态 目录下的文件 | [my_tools/master_writer.py](my_tools/master_writer.py) |
+| novel_reader | 小说写手专用读取工具（受限白名单），只允许读取 _task/、05-参考/、02-正文/ 目录下的文件 | [my_tools/novel_reader.py](my_tools/novel_reader.py) |
 
 ### 自定义技能
 
@@ -127,7 +129,7 @@ DeerFlow 是一个开源的 super agent harness，本项目在其基础上二开
 | 工作流 | 功能 | 说明 |
 |--------|------|------|
 | organize | 整理工作流 | 步骤1-4：确认章节→创建文件夹→并行整理(世界观/人物/道具)→汇总 |
-| writing | 写作工作流 | 写作→审核→(通过/修改2次后)→同步细纲 |
+| writing | 写作工作流 | 检查任务汇总→写作→审核→(通过/修改2次后)→同步细纲 |
 | post_process | 后处理工作流 | 摘要+状态+伏笔+名片+同步细纲，可独立调用 |
 
 主 Agent 通过 `workflow` 工具调用工作流：

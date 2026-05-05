@@ -1,4 +1,4 @@
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 
 import { getBackendBaseURL } from "../config";
 
@@ -14,6 +14,25 @@ export function useNovelTags() {
     },
     staleTime: 5 * 60 * 1000,
   });
+}
+
+export function useRefreshNovelTags() {
+  const queryClient = useQueryClient();
+
+  const refresh = async () => {
+    await queryClient.invalidateQueries({ queryKey: ["novel-tags"] });
+    const response = await fetch(
+      `${getBackendBaseURL()}/api/novel-tags/?refresh=1`,
+    );
+    if (!response.ok) {
+      throw new Error("Failed to refresh novel tags");
+    }
+    const data = await response.json();
+    queryClient.setQueryData(["novel-tags"], data);
+    return data as { tags: string[] };
+  };
+
+  return { refresh };
 }
 
 interface ThreadVariable {
@@ -41,7 +60,7 @@ export function useThreadNovelToc(threadId: string, isNewThread: boolean) {
         variables: ThreadVariable[];
       };
       const novelToc = data.variables.find((v) => v.key === "novel_toc");
-      return novelToc?.value;
+      return novelToc?.value ?? null;
     },
     staleTime: 30 * 1000,
   });

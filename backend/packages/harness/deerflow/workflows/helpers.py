@@ -36,11 +36,25 @@ def get_novel_base(thread_id: str | None = None) -> str | None:
             return None
 
         # Convert container virtual path to host path
-        # /mnt/shared-data/... -> backend/.deer-flow/shared-data/...
-        if novel_base and novel_base.startswith("/mnt/shared-data/"):
-            from deerflow.config.paths import get_paths
-            relative = novel_base[len("/mnt/shared-data/"):].lstrip("/")
-            novel_base = str(get_paths().base_dir / "shared-data" / relative)
+        # Read host_path from config.yaml mounts configuration
+        if novel_base and novel_base.startswith("/mnt/"):
+            from deerflow.config.app_config import get_app_config
+            config = get_app_config()
+            mounts = config.sandbox.mounts if config and config.sandbox else []
+            
+            # Find matching mount for this virtual path
+            for mount in mounts:
+                container_path = mount.container_path.rstrip("/")
+                if novel_base.startswith(container_path + "/") or novel_base == container_path:
+                    # Extract relative path after container_path
+                    relative = novel_base[len(container_path):].lstrip("/")
+                    # Use configured host_path
+                    host_path = Path(mount.host_path)
+                    if not host_path.is_absolute():
+                        from deerflow.config.paths import get_paths
+                        host_path = (get_paths().base_dir.parent.parent / host_path).resolve()
+                    novel_base = str(host_path / relative) if relative else str(host_path)
+                    break
 
         return novel_base
     except Exception as e:

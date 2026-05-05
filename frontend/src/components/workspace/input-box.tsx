@@ -60,7 +60,11 @@ import {
 import { getBackendBaseURL } from "@/core/config";
 import { useI18n } from "@/core/i18n/hooks";
 import { useModels } from "@/core/models/hooks";
-import { useNovelTags, useThreadNovelToc } from "@/core/novel-tags/hooks";
+import {
+  useNovelTags,
+  useRefreshNovelTags,
+  useThreadNovelToc,
+} from "@/core/novel-tags/hooks";
 import type { AgentThreadContext } from "@/core/threads";
 import { textOfMessage } from "@/core/threads/utils";
 import type {
@@ -174,6 +178,8 @@ export function InputBox({
     isLoading: isLoadingTags,
     error: novelTagsError,
   } = useNovelTags();
+  const { refresh: refreshNovelTags } = useRefreshNovelTags();
+  const [isRefreshingTags, setIsRefreshingTags] = useState(false);
   const { data: threadNovelToc, isLoading: tocLoading } = useThreadNovelToc(
     threadId,
     isNewThread ?? false,
@@ -210,6 +216,17 @@ export function InputBox({
     },
     [threadId],
   );
+
+  const handleRefreshNovelTags = useCallback(async () => {
+    setIsRefreshingTags(true);
+    try {
+      await refreshNovelTags();
+    } catch {
+      // ignore
+    } finally {
+      setIsRefreshingTags(false);
+    }
+  }, [refreshNovelTags]);
 
   const [followups, setFollowups] = useState<string[]>([]);
   const [followupsHidden, setFollowupsHidden] = useState(false);
@@ -528,6 +545,8 @@ export function InputBox({
             locked={novelLocked}
             isLoading={isLoadingTags || tocLoading}
             error={novelTagsError}
+            onRefresh={handleRefreshNovelTags}
+            isRefreshing={isRefreshingTags}
           />
         </div>
       )}

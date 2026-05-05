@@ -144,17 +144,20 @@ def _scan_novel_tocs() -> list[str]:
 
 @router.get("")
 @router.get("/")
-async def get_novel_tags():
+async def get_novel_tags(refresh: int = 0):
     """
     Get all available novel TOC paths.
 
     Scans configured sandbox mount paths for book/books directories and returns
     all novel directory paths (container paths) as TOC enum values.
+
+    Args:
+        refresh: Set to 1 to force refresh the cache.
     """
     current_time = time.time()
 
-    # Check cache validity
-    if _novel_tags_cache["tags"] and current_time - _novel_tags_cache["last_updated"] < _novel_tags_cache["ttl"]:
+    # Check cache validity (skip if refresh is requested)
+    if not refresh and _novel_tags_cache["tags"] and current_time - _novel_tags_cache["last_updated"] < _novel_tags_cache["ttl"]:
         return {"tags": _novel_tags_cache["tags"]}
 
     # Scan and update cache

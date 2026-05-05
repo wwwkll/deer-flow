@@ -1,6 +1,7 @@
 """Novel writing workflow - Writing, audit, and post-processing."""
 
 import logging
+import os
 import re
 from typing import Any
 
@@ -10,6 +11,7 @@ from deerflow.config.subagents_config import get_subagents_app_config
 from deerflow.workflows.helpers import call_subagent, get_novel_base, normalize_chapter_group, read_file_safe
 from deerflow.workflows.registry import register_workflow
 from deerflow.workflows.states import NovelWorkflowState
+from my_tools.path_resolver import set_current_thread_id
 
 logger = logging.getLogger(__name__)
 
@@ -52,6 +54,51 @@ def _inject_data(label: str, path: str, data: str | None) -> str:
 
 
 INJECTION_NOTE = '【重要提示】以下内容已直接注入到你的上下文中：\n- 标注"【已注入】"的文件，内容已完整提供，严禁使用read_file工具重复读取，否则将严重浪费上下文窗口\n- 标注"[未成功注入]"的文件，请按提供的路径使用read_file自行读取\n\n'
+
+
+async def check_task_summary(state: NovelWorkflowState) -> dict[str, Any]:
+    """检查写作任务汇总文件是否已生成，未生成则终止工作流。"""
+    set_current_thread_id(state.get("thread_id"))
+
+    novel_name = state.get("novel_name", "")
+    chapter_num = state.get("chapter_num", 0)
+    chapter_group = state.get("chapter_group", "")
+    writing_task_summary = state.get("writing_task_summary", "")
+
+    if writing_task_summary and len(writing_task_summary.strip()) > 50:
+        logger.info("写作任务汇总已通过 state 注入，跳过文件检查")
+        return {}
+
+    novel_base = get_novel_base(thread_id=state.get("thread_id"))
+    if not novel_base:
+        return {"errors": ["无法获取小说根目录，请检查全局变量 novel_toc"]}
+
+    chapter_group_normalized = normalize_chapter_group(chapter_group)
+    task_summary_path = os.path.join(
+        novel_base, "02-正文", chapter_group_normalized, "_task", "写作任务汇总.md"
+    )
+
+    if not os.path.exists(task_summary_path):
+        rel_path = _get_rel_path(task_summary_path)
+        error_msg = (
+            f"工作流运行失败，未检测到 {rel_path} 文件，"
+            f"请运行整理工作流（organize）重新生成"
+        )
+        logger.error(error_msg)
+        return {"errors": [error_msg]}
+
+    logger.info(f"写作任务汇总文件检查通过: {task_summary_path}")
+    return {}
+
+
+def _should_proceed_to_write(state: NovelWorkflowState) -> str:
+    """判断是否可以进入写作阶段。"""
+    errors = state.get("errors", [])
+    if errors:
+        for err in errors:
+            if "写作任务汇总" in err:
+                return "end_with_error"
+    return "write_chapter"
 
 
 async def write_chapter(state: NovelWorkflowState) -> dict[str, Any]:
@@ -483,13 +530,24 @@ def should_revise(state: NovelWorkflowState) -> str:
 def create_writing_workflow() -> StateGraph:
     workflow = StateGraph(NovelWorkflowState)
 
+    workflow.add_node("check_task_summary", check_task_summary)
     workflow.add_node("write_chapter", write_chapter)
     workflow.add_node("audit", audit_chapter)
     workflow.add_node("revise", revise_chapter)
     workflow.add_node("post_process", post_process)
     workflow.add_node("sync_outline", sync_outline)
 
-    workflow.set_entry_point("write_chapter")
+    workflow.set_entry_point("check_task_summary")
+
+    workflow.add_conditional_edges(
+        "check_task_summary",
+        _should_proceed_to_write,
+        {
+            "write_chapter": "write_chapter",
+            "end_with_error": END,
+        },
+    )
+
     workflow.add_edge("write_chapter", "audit")
 
     workflow.add_conditional_edges(

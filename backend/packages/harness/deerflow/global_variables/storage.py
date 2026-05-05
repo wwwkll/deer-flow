@@ -12,75 +12,101 @@ from deerflow.config.paths import get_paths
 
 logger = logging.getLogger(__name__)
 
-# System variables (stored in memory, merged on load)
-SYSTEM_VARIABLES: dict[str, Any] = {
-    "workdir": {
-        "value": "/mnt/shared-data",
-        "description": "Shared workspace directory",
-        "is_system": True,
-        "llm_editable": False,
-        "updated_at": "system",
-        "updated_by": "system",
-    },
-    "novel_dir_structure": {
-        "value": (
-            "工作目录/book/[小说名称]/\n"
-            "├── card.json                    # 小说名片（JSON 格式，记录进度等元数据）\n"
-            "├── 00-世界观/\n"
-            "│   ├── 故事圣经.md           # 故事圣经（世界观、力量体系、核心冲突）\n"
-            "│   ├── 角色矩阵.md      # 角色矩阵（角色档案、关系网）\n"
-            "│   ├── 支线板.md         # 支线板（多条故事线跟踪）\n"
-            "│   └── 情感弧线.md        # 情感弧线（角色情感发展）\n"
-            "├── 01-规划/\n"
-            "│   ├── 卷纲.md        # 卷纲（分卷概览 + 章节分组规划）\n"
-            "│   ├── 本书规则.json          # 本书规则（JSON 格式，硬规则+风格指南）\n"
-            "│   ├── 创作计划.md             # 创作计划\n"
-            "│   └── chapters/                # 章节细纲（每 5 章一组）\n"
-            "│       ├── 第01-05章-细纲.md\n"
-            "│       ├── 第06-10章-细纲.md\n"
-            "│       └── ...\n"
-            "├── 02-正文/                     # 正文按章节组组织\n"
-            "│   └── 第N-M章/                 # 每组一个文件夹（如：第01-05章/）\n"
-            "│       ├── _task/               # 临时任务目录（写作时创建，完成后清理）\n"
-            "│       │   ├── 世界观参考.md\n"
-            "│       │   ├── 人物参考.md\n"
-            "│       │   ├── 道具参考.md\n"
-            "│       │   ├── 故事线参考.md\n"
-            "│       │   ├── 用户要求.md\n"
-            "│       │   └── 写作任务汇总.md\n"
-            "│       ├── 第N章.md             # 各章节正文\n"
-            "│       ├── 第N+1章.md\n"
-            "│       └── ...\n"
-            "├── 03-状态/\n"
-            "│   ├── 当前状态卡.md         # 当前状态卡（主角位置、目标、敌人等）\n"
-            "│   ├── 待办事项.md         # 伏笔池（未解决伏笔跟踪）\n"
-            "│   └── 章节摘要汇总.md     # 章节摘要汇总\n"
-            "├── 04-审稿/\n"
-            "│   ├── 第01章-审计报告.md\n"
-            "│   ├── 第01章-修改记录.md\n"
-            "│   └── ...\n"
-            "├── 05-参考/\n"
-            "│   ├── 样式指纹.md         # 风格指纹（从样章提取）\n"
-            "│   └── 市场分析.md          # 市场分析（如适用）\n"
-            "└── 06-归档/\n"
-            "    ├── 合并后的卷摘要.md # 压缩后的卷摘要\n"
-            "    └── 历史版本/                 # 重要修改前备份"
-        ),
-        "description": "Novel project directory structure template",
-        "is_system": True,
-        "llm_editable": False,
-        "updated_at": "system",
-        "updated_by": "system",
-    },
-}
+
+def _get_workdir_value() -> str:
+    """Get workdir value from sandbox mounts configuration.
+
+    Reads the first mount's container_path from config.yaml sandbox.mounts.
+    Falls back to '/mnt/shared-data' if not configured.
+    """
+    try:
+        from deerflow.config.app_config import get_app_config
+
+        config = get_app_config()
+        mounts = config.sandbox.mounts if config and config.sandbox else []
+        if mounts:
+            return mounts[0].container_path
+    except Exception as e:
+        logger.warning(f"Failed to read sandbox mounts for workdir: {e}")
+    return "/mnt/shared-data"
+
+
+def _build_system_variables() -> dict[str, Any]:
+    """Build system variables dict with dynamic workdir from config."""
+    return {
+        "workdir": {
+            "value": _get_workdir_value(),
+            "description": "Shared workspace directory",
+            "is_system": True,
+            "llm_editable": False,
+            "updated_at": "system",
+            "updated_by": "system",
+        },
+        "novel_dir_structure": {
+            "value": (
+                "工作目录/book/[小说名称]/\n"
+                "├── card.json                    # 小说名片（JSON 格式，记录进度等元数据）\n"
+                "├── 00-世界观/\n"
+                "│   ├── 故事圣经.md           # 故事圣经（世界观、力量体系、核心冲突）\n"
+                "│   ├── 角色矩阵.md      # 角色矩阵（角色档案、关系网）\n"
+                "│   ├── 支线板.md         # 支线板（多条故事线跟踪）\n"
+                "│   └── 情感弧线.md        # 情感弧线（角色情感发展）\n"
+                "├── 01-规划/\n"
+                "│   ├── 卷纲.md        # 卷纲（分卷概览 + 章节分组规划）\n"
+                "│   ├── 本书规则.json          # 本书规则（JSON 格式，硬规则+风格指南）\n"
+                "│   ├── 创作计划.md             # 创作计划\n"
+                "│   └── chapters/                # 章节细纲（每 5 章一组）\n"
+                "│       ├── 第01-05章-细纲.md\n"
+                "│       ├── 第06-10章-细纲.md\n"
+                "│       └── ...\n"
+                "├── 02-正文/                     # 正文按章节组组织\n"
+                "│   └── 第N-M章/                 # 每组一个文件夹（如：第01-05章/）\n"
+                "│       ├── _task/               # 临时任务目录（写作时创建，完成后清理）\n"
+                "│       │   ├── 世界观参考.md\n"
+                "│       │   ├── 人物参考.md\n"
+                "│       │   ├── 道具参考.md\n"
+                "│       │   ├── 故事线参考.md\n"
+                "│       │   ├── 用户要求.md\n"
+                "│       │   └── 写作任务汇总.md\n"
+                "│       ├── 第N章.md             # 各章节正文\n"
+                "│       ├── 第N+1章.md\n"
+                "│       └── ...\n"
+                "├── 03-状态/\n"
+                "│   ├── 当前状态卡.md         # 当前状态卡（主角位置、目标、敌人等）\n"
+                "│   ├── 待办事项.md         # 伏笔池（未解决伏笔跟踪）\n"
+                "│   └── 章节摘要汇总.md     # 章节摘要汇总\n"
+                "├── 04-审稿/\n"
+                "│   ├── 第01章-审计报告.md\n"
+                "│   ├── 第01章-修改记录.md\n"
+                "│   └── ...\n"
+                "├── 05-参考/\n"
+                "│   ├── 样式指纹.md         # 风格指纹（从样章提取）\n"
+                "│   └── 市场分析.md          # 市场分析（如适用）\n"
+                "└── 06-归档/\n"
+                "    ├── 合并后的卷摘要.md # 压缩后的卷摘要\n"
+                "    └── 历史版本/                 # 重要修改前备份"
+            ),
+            "description": "Novel project directory structure template",
+            "is_system": True,
+            "llm_editable": False,
+            "updated_at": "system",
+            "updated_by": "system",
+        },
+    }
+
+
+def _get_system_variables() -> dict[str, Any]:
+    """Get system variables with dynamic workdir from config."""
+    return {"variables": _build_system_variables(), "is_system": True}
+
+
+def get_system_variables() -> dict[str, Any]:
+    """Get system variables (public API)."""
+    return _get_system_variables()
 
 
 def utc_now_iso_z() -> str:
     return datetime.now(UTC).isoformat().removesuffix("+00:00") + "Z"
-
-
-def get_system_variables() -> dict[str, Any]:
-    return {"variables": dict(SYSTEM_VARIABLES), "is_system": True}
 
 
 class GlobalVariablesStorage:
@@ -150,7 +176,8 @@ class GlobalVariablesStorage:
         """
         now = utc_now_iso_z()
         cursor = conn.cursor()
-        for key, var_data in SYSTEM_VARIABLES.items():
+        system_vars = _build_system_variables()
+        for key, var_data in system_vars.items():
             cursor.execute(
                 """
                 UPDATE global_variables
@@ -181,7 +208,7 @@ class GlobalVariablesStorage:
             Dictionary with 'variables', 'lastUpdated', and 'is_custom' keys.
         """
         if scope == "thread" and not thread_id:
-            return {**get_system_variables(), "is_custom": False}
+            return {**_get_system_variables(), "is_custom": False}
 
         with self._get_connection() as conn:
             cursor = conn.cursor()
@@ -235,7 +262,7 @@ class GlobalVariablesStorage:
             last_updated = row["last_updated"] if row and row["last_updated"] else ""
 
             # Merge with system variables (DB values take precedence)
-            all_variables = {**SYSTEM_VARIABLES, **variables}
+            all_variables = {**_build_system_variables(), **variables}
 
             user_variable_count = sum(1 for v in variables.values() if not (isinstance(v, dict) and v.get("is_system")))
 

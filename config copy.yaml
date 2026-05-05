@@ -145,6 +145,14 @@ tools:
     group: novel
     use: my_tools.card_validator:card_validator
 
+  - name: novel_reader
+    group: novel
+    use: my_tools.novel_reader:novel_reader
+
+  - name: master_writer
+    group: novel
+    use: my_tools.master_writer:master_writer
+
 tool_search:
   enabled: false
 
@@ -597,7 +605,7 @@ subagents:
         - 开篇直接进入剧情
         - 结尾留合适的钩子
       tools:
-        - read_file
+        - novel_reader
         - write_file
       model: inherit
       max_turns: 80

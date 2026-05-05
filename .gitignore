@@ -40,6 +40,7 @@ coverage/
 backend/.deer-flow/*
 !backend/.deer-flow/agents/
 !backend/.deer-flow/agents/**/
+# !backend/.deer-flow/agents/**/config.yaml
 .claude/
 skills/custom/*
 logs/

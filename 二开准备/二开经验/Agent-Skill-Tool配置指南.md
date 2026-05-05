@@ -43,7 +43,8 @@ tool_groups:
   - name: file:read        # 文件读取组
   - name: file:write       # 文件写入组
   - name: bash             # 命令行组
-  - name: novel            # 小说写作工具组（自定义）
+  - name: novel:tools      # 小说系统工具组（context_assembler、card_validator 等）
+  - name: master:write     # 主控专用写入组（受限白名单，master_writer）
 ```
 
 #### 步骤 2：注册具体工具
@@ -61,12 +62,17 @@ tools:
 
   # === 自定义工具示例 ===
   - name: context_assembler
-    group: novel
+    group: novel:tools
     use: my_tools.context_assembler:context_assembler
 
   - name: card_validator
-    group: novel
+    group: novel:tools
     use: my_tools.card_validator:card_validator
+
+  # === 主控专用工具（受限白名单）===
+  - name: master_writer
+    group: master:write
+    use: my_tools.master_writer:master_writer
 ```
 
 **字段说明**：
@@ -113,6 +119,89 @@ Agent 在对话中调用工具：
 - fix: true
 ```
 
+### 2.4 受限白名单工具模式
+
+当需要限制 Agent 只能操作特定文件时，可以创建受限白名单工具，替代通用的 `file:write`。
+
+**设计思路**：
+- 移除 Agent 的通用写入权限（`file:write`、`bash`）
+- 创建专用工具，内部使用白名单验证路径
+- 只允许写入特定目录/文件
+
+**示例：master_writer 工具**（novel-master 专用）：
+
+| 操作 | 允许 | 说明 |
+|------|------|------|
+| 创建目录 | ✅ | 新建小说时创建目录结构 |
+| 写入 `03-状态/` 目录 | ✅ | 阶段性总结等状态文件 |
+| 写入 `card.json` | ❌ | 由 `card_validator` 工具处理 |
+| 写入 `02-正文/` | ❌ | 由 `novel-writer` 子 Agent 处理 |
+| 写入 `01-规划/` | ❌ | 由 `outline-planner` 等子 Agent 处理 |
+
+**核心验证逻辑**：
+
+```python
+def _is_allowed_path(file_path: str) -> bool:
+    path_obj = Path(file_path)
+    # 白名单：只允许 03-状态 目录下的文件
+    if path_obj.parent.name == "03-状态":
+        return True
+    return False
+```
+
+**配置方式**：
+
+```yaml
+# config.yaml - 工具组和工具注册
+tool_groups:
+  - name: master:write     # 受限写入组
+
+tools:
+  - name: master_writer
+    group: master:write
+    use: my_tools.master_writer:master_writer
+
+# novel-master/config.yaml - Agent 引用
+tool_groups:
+  - file:read
+  - master:write    # 替代 file:write + bash
+  - novel:tools
+```
+
+**优势**：
+- 最小权限原则：Agent 只获得完成任务所需的最小权限
+- 防止越权：主控 Agent 无法直接写正文/规划文件
+- 职责分离：所有业务文件写入由对应子 Agent 完成
+
+**示例：novel_reader 工具**（novel-writer 专用）：
+
+| 路径 | 允许 | 说明 |
+|------|------|------|
+| `*/_task/*` | ✅ | 写作任务汇总等 |
+| `*/05-参考/*` | ✅ | 样式指纹等 |
+| `*/02-正文/*` | ✅ | 正文章节（上一章参考） |
+| `*/03-状态/*` | ❌ | 由 state-settler 等处理 |
+| `*/00-世界观/*` | ❌ | 由 organizer 处理 |
+| `*/01-规划/*` | ❌ | 由 outline-planner 处理 |
+
+配置方式：
+
+```yaml
+# config.yaml
+tool_groups:
+  - name: novel:reader
+
+tools:
+  - name: novel_reader
+    group: novel:reader
+    use: my_tools.novel_reader:novel_reader
+
+# novel-writer/config.yaml
+tool_groups:
+  - novel:reader    # 替代 file:read
+  - file:write      # 保留写入权限
+```
+
 ---
 
 ## 三、配置 Agent
@@ -137,9 +226,8 @@ description: |
 model: null                        # null = 使用全局默认模型
 tool_groups:                       # 此 Agent 可用的工具组
   - file:read
-  - file:write
-  - bash
-  - novel                          # 包含自定义工具（context_assembler 等）
+  - master:write                   # 主控专用写入组（master_writer）
+  - novel:tools                    # 小说系统工具组（card_validator 等）
 skills:                            # 此 Agent 可用的技能
   - novel-post-write-validator
   - novel-anti-ai-detector
@@ -307,16 +395,16 @@ skills/novel-post-write-validator/
 ```
 Agent (novel-master)
 ├── 使用 tool_groups → 获得一组工具
-│   ├── file:read    → read_file, glob, grep
-│   ├── file:write   → write_file, str_replace
-│   └── novel        → context_assembler, card_validator, ...
+│   ├── file:read     → read_file, glob, grep
+│   ├── master:write  → master_writer（受限白名单：创建目录 + 写入 03-状态）
+│   └── novel:tools   → context_assembler, card_validator, ...
 │
 ├── 使用 skills      → 加载技能提示词
 │   ├── novel-post-write-validator
 │   └── novel-anti-ai-detector
 │
 └── 调用子 Agent     → 通过 task 工具委派任务
-    ├── novel-writer
+    ├── novel-writer        （有 file:write，可写正文）
     ├── novel-architect
     └── continuity-auditor
 ```
@@ -326,6 +414,7 @@ Agent (novel-master)
 | 概念 | 本质 | 用途 | 执行方式 |
 |------|------|------|----------|
 | **Tool** | Python 函数 | 执行具体操作（读写文件、验证格式等） | Agent 直接调用 |
+| **受限白名单Tool** | Python 函数（带路径验证） | 限制 Agent 只能操作特定文件（如 master_writer） | Agent 直接调用，白名单拦截 |
 | **Skill** | 提示词模板 | 增强 Agent 的特定能力 | 自动加载到上下文 |
 | **Agent** | 独立 LLM 会话 | 执行复杂任务（写正文、审核等） | 通过 task 工具委派 |
 
@@ -354,11 +443,11 @@ subagents:
 
 ```yaml
 tool_groups:
-  - name: my-custom-group    # 新增工具组
+  - name: my:custom-group    # 新增工具组（建议使用冒号分隔的命名风格）
 
 tools:
   - name: my-tool
-    group: my-custom-group   # 归入新工具组
+    group: my:custom-group   # 归入新工具组
     use: my_tools.my_module:my_function
 ```
 
@@ -367,7 +456,7 @@ tools:
 ```yaml
 tool_groups:
   - file:read
-  - my-custom-group          # 引用新工具组
+  - my:custom-group          # 引用新工具组
 ```
 
 ---

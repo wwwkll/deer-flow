@@ -1,4 +1,4 @@
-import { Check, ChevronsUpDown, Lock } from "lucide-react";
+import { Check, ChevronsUpDown, Lock, RefreshCw } from "lucide-react";
 import { useState, useCallback, useMemo } from "react";
 
 import { Button } from "@/components/ui/button";
@@ -24,6 +24,8 @@ interface NovelTagSelectorProps {
   locked?: boolean;
   isLoading?: boolean;
   error?: Error | null;
+  onRefresh?: () => void;
+  isRefreshing?: boolean;
 }
 
 export function NovelTagSelector({
@@ -33,6 +35,8 @@ export function NovelTagSelector({
   locked = false,
   isLoading = false,
   error = null,
+  onRefresh,
+  isRefreshing = false,
 }: NovelTagSelectorProps) {
   const [open, setOpen] = useState(false);
 
@@ -85,7 +89,29 @@ export function NovelTagSelector({
       </DropdownMenuTrigger>
       <DropdownMenuContent className="w-full p-0" align="start">
         <Command>
-          <CommandInput placeholder="搜索小说..." />
+          <div className="flex items-center gap-1 border-b px-2">
+            <CommandInput
+              placeholder="搜索小说..."
+              className="flex-1 border-0 focus:ring-0"
+            />
+            {onRefresh && (
+              <Button
+                variant="ghost"
+                size="sm"
+                className="h-7 w-7 shrink-0 px-0"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onRefresh();
+                }}
+                disabled={isRefreshing}
+                title="刷新小说列表"
+              >
+                <RefreshCw
+                  className={cn("h-3.5 w-3.5", isRefreshing && "animate-spin")}
+                />
+              </Button>
+            )}
+          </div>
           <CommandList>
             <CommandEmpty>
               {isLoading
