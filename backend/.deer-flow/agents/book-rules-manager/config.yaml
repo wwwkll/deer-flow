@@ -2,7 +2,7 @@ name: book-rules-manager
 description: |
   本书规则管理器，负责管理 本书规则.json。
   支持查看、新增、修改、删除规则。
-model: null
+model: inherit
 tool_groups:
   - file:read
   - file:write
