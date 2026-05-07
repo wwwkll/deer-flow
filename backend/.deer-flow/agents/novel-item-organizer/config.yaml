@@ -1,10 +1,10 @@
-name: novel-item-organizer
 description: |
-  道具整理员，负责在写作前整理当前章节出场的道具和技能。
-  从故事圣经提取相关道具和技能信息。
-model: null
-tool_groups:
+  道具整理员，负责在写作前整理当前章节涉及的道具和技能。
+  从道具数据库和技能数据库中提取相关道具技能信息。
+  当需要为写作准备道具技能参考时调用此Agent。
+tools:
   - file:read
   - file:write
-subagent_enabled: false
-max_concurrent_subagents: 0
+model: inherit
+max_turns: 60
+timeout_seconds: 600

@@ -114,6 +114,7 @@ def _discover_thread_id() -> str | None:
 
         if candidates:
             candidates.sort(reverse=True)
+            logger.info("[path_resolver] 自动发现 thread_id=%s", candidates[0][1])
             return candidates[0][1]
     except Exception as e:
         logger.warning(f"Failed to discover thread_id: {e}")
@@ -143,6 +144,7 @@ def resolve_to_host_path(file_path: str) -> str:
     if normalized.startswith("/mnt/user-data"):
         result = _resolve_user_data_path(normalized)
         if result:
+            logger.info("[path_resolver] resolve_to_host_path | %s -> %s (user-data)", file_path, result)
             return result
 
     # 2. Check sandbox mounts (handles /mnt/shared-data/ and any other custom mounts)
@@ -151,7 +153,11 @@ def resolve_to_host_path(file_path: str) -> str:
         if normalized == container_path or normalized.startswith(container_path + "/"):
             relative = normalized[len(container_path):].lstrip("/")
             if relative:
-                return str(Path(host_path) / relative)
+                resolved = str(Path(host_path) / relative)
+                logger.info("[path_resolver] resolve_to_host_path | %s -> %s (mount)", file_path, resolved)
+                return resolved
+            logger.info("[path_resolver] resolve_to_host_path | %s -> %s (mount)", file_path, host_path)
             return host_path
 
+    logger.debug("[path_resolver] resolve_to_host_path | %s -> %s (未匹配，原样返回)", file_path, file_path)
     return file_path

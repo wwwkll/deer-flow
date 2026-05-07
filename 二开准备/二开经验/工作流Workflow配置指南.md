@@ -56,21 +56,38 @@ backend/packages/harness/deerflow/workflows/
 
 **流程**：
 ```
-confirm_chapter → create_task_folder → organize_world ──┐
-                                  → organize_characters ─┼→ assemble_context
-                                  → organize_items ─────┘
+confirm_chapter → create_task_folder → [检查文件] → organize_world ──┐
+                                         ↓ [文件存在则跳过]        → organize_characters ─┼→ assemble_context
+                                                                  → organize_items ─────┘
+                                                                  → organize_storyline ─┘
 ```
 
 **节点说明**：
 
-| 节点 | 功能 | 调用的子Agent |
-|------|------|---------------|
-| confirm_chapter | 确认章节号和章节组 | 无（纯代码） |
-| create_task_folder | 创建 _task/ 目录 | 无（纯代码） |
-| organize_world | 整理世界观 | novel-world-organizer |
-| organize_characters | 整理人物 | novel-character-organizer |
-| organize_items | 整理道具 | novel-item-organizer |
-| assemble_context | 汇总写作任务 | 无（纯代码） |
+| 节点 | 功能 | 调用的子Agent | 输出文件 |
+|------|------|---------------|----------|
+| confirm_chapter | 确认章节号和章节组 | 无（纯代码） | - |
+| create_task_folder | 创建 _task/ 目录 | 无（纯代码） | - |
+| organize_world | 整理世界观 | novel-world-organizer | 世界观参考.md |
+| organize_characters | 整理人物 | novel-character-organizer | 人物参考.md |
+| organize_items | 整理道具 | novel-item-organizer | 道具参考.md |
+| organize_storyline | 整理故事线 | novel-storyline-organizer | 故事线参考.md |
+| assemble_context | 汇总写作任务 | 无（纯代码） | 写作任务汇总.md |
+
+**文件检查机制**：
+
+工作流在调用每个 organize agent 前会检查对应的参考文件是否已存在：
+- 如果文件已存在，跳过该 agent 的调用（节省 LLM 调用）
+- 如果文件不存在，正常调用 agent 生成文件
+- 最后的 `assemble_context`（合并）**始终会重新执行**，确保汇总文件是最新的
+
+**检查逻辑**：
+```
+_task/世界观参考.md 存在 → 跳过 organize_world
+_task/人物参考.md 存在 → 跳过 organize_characters
+_task/道具参考.md 存在 → 跳过 organize_items
+_task/故事线参考.md 存在 → 跳过 organize_storyline
+```
 
 **调用示例**：
 ```

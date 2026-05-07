@@ -39,3 +39,7 @@ class ModelConfig(BaseModel):
             "This is a shortcut for `when_thinking_enabled` and will be merged with `when_thinking_enabled` if both are provided."
         ),
     )
+    context_window: int | None = Field(
+        default=None,
+        description="Maximum context window size in tokens (input + output). If None, will auto-detect from provider API for compatible endpoints.",
+    )

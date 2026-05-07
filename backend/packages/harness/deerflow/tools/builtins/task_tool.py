@@ -92,7 +92,13 @@ async def task_tool(
     # No longer appended to system_prompt here.
 
     if max_turns is not None:
-        overrides["max_turns"] = max_turns
+        # For custom subagents, use the larger of LLM-provided max_turns and config max_turns.
+        # This prevents the LLM from accidentally setting max_turns too low, which would cause
+        # GraphRecursionError before the subagent can complete its task.
+        effective_max_turns = max(max_turns, config.max_turns)
+        if effective_max_turns != max_turns:
+            logger.info(f"max_turns overridden: {max_turns} -> {effective_max_turns} (using config max_turns={config.max_turns} as floor for custom subagent '{subagent_type}')")
+        overrides["max_turns"] = effective_max_turns
 
     # Extract parent context from runtime
     sandbox_state = None

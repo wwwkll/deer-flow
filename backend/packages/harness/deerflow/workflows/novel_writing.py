@@ -8,7 +8,7 @@ from typing import Any
 from langgraph.graph import END, StateGraph
 
 from deerflow.config.subagents_config import get_subagents_app_config
-from deerflow.workflows.helpers import call_subagent, get_novel_base, normalize_chapter_group, read_file_safe
+from deerflow.workflows.helpers import call_subagent, get_novel_base, normalize_chapter_group, read_file_safe, update_novel_card
 from deerflow.workflows.registry import register_workflow
 from deerflow.workflows.states import NovelWorkflowState
 from my_tools.path_resolver import set_current_thread_id
@@ -31,29 +31,31 @@ def _get_rel_path(path: str) -> str:
     """Extract relative path from novel base directory."""
     from deerflow.workflows.helpers import get_novel_base
     novel_base = get_novel_base()
-    if novel_base and path.startswith(novel_base + "/"):
-        return path.replace(novel_base + "/", "")
-    return path
+    if not novel_base:
+        return path
+    # Normalize both paths to use forward slashes for comparison (cross-platform)
+    path_normalized = path.replace("\\", "/")
+    novel_base_normalized = novel_base.replace("\\", "/")
+    if path_normalized.startswith(novel_base_normalized + "/"):
+        return path_normalized.replace(novel_base_normalized + "/", "")
+    return path_normalized
 
 
 def _inject(label: str, path: str, required: bool = True) -> str:
-    content = read_file_safe(path)
+    # 提示词注入已禁用，让 Agent 自行读取文件
     rel_path = _get_rel_path(path)
-    if content:
-        return f"## {label}（【已注入】{rel_path} —— 严禁使用read_file重复读取，内容已完整提供）\n\n{content}\n"
     if required:
-        return f"## {label}\n路径：{path}（相对路径：{rel_path}）\n[未成功注入，请用read_file自行读取]\n"
+        return f"## {label}\n路径：{path}（相对路径：{rel_path}）\n[请用read_file自行读取]\n"
     return f"## {label}\n路径：{path}（相对路径：{rel_path}）\n[文件不存在，跳过]\n"
 
 
 def _inject_data(label: str, path: str, data: str | None) -> str:
+    # 提示词注入已禁用，让 Agent 自行读取文件
     rel_path = _get_rel_path(path)
-    if data:
-        return f"## {label}（【已注入】{rel_path} —— 严禁使用read_file重复读取，内容已完整提供）\n\n{data}\n"
-    return f"## {label}\n路径：{path}（相对路径：{rel_path}）\n[未成功注入，请用read_file自行读取]\n"
+    return f"## {label}\n路径：{path}（相对路径：{rel_path}）\n[请用read_file自行读取]\n"
 
 
-INJECTION_NOTE = '【重要提示】以下内容已直接注入到你的上下文中：\n- 标注"【已注入】"的文件，内容已完整提供，严禁使用read_file工具重复读取，否则将严重浪费上下文窗口\n- 标注"[未成功注入]"的文件，请按提供的路径使用read_file自行读取\n\n'
+INJECTION_NOTE = '【重要提示】以下是需要参考的文件路径，请使用 read_file 工具自行读取：\n\n'
 
 
 async def check_task_summary(state: NovelWorkflowState) -> dict[str, Any]:
@@ -126,11 +128,13 @@ async def write_chapter(state: NovelWorkflowState) -> dict[str, Any]:
     prev_chapter_num = chapter_num - 1
     prev_chapter_path = f"{novel_base}/02-正文/{chapter_group_normalized}/第{prev_chapter_num}章.md"
     style_path = f"{novel_base}/05-参考/样式指纹.md"
+    outline_path = f"{novel_base}/01-规划/chapters/{chapter_group_normalized}-细纲.md"
     output_path = f"{novel_base}/02-正文/{chapter_group_normalized}/第{chapter_num}章.md"
 
     sections = _inject("写作任务汇总", writing_task_summary)
     sections += _inject("样式指纹", style_path)
     sections += _inject("上一章正文", prev_chapter_path, required=False)
+    sections += _inject("章节组细纲", outline_path, required=False)
 
     task = f"""你的任务是撰写第{chapter_num}章正文。
 
@@ -211,7 +215,11 @@ async def audit_chapter(state: NovelWorkflowState) -> dict[str, Any]:
         }
     except Exception as e:
         logger.error(f"Audit chapter failed: {e}")
-        return {"errors": [f"Audit chapter failed: {e}"]}
+        return {
+            "errors": [f"Audit chapter failed: {e}"],
+            "audit_passed": False,
+            "audit_round": state.get("audit_round", 0) + 1,
+        }
 
 
 async def revise_chapter(state: NovelWorkflowState) -> dict[str, Any]:
@@ -389,34 +397,18 @@ async def _post_process_card(state: NovelWorkflowState) -> dict[str, Any]:
     """Update novel card."""
     chapter_num = state.get("chapter_num", 0)
     chapter_content = state.get("chapter_content", "")
-    thread_id = state.get("thread_id")
-    model_name = state.get("model_name")
 
-    novel_base = get_novel_base(thread_id=thread_id)
+    novel_base = get_novel_base(thread_id=state.get("thread_id"))
     if not novel_base:
         return {"errors": ["无法获取小说根目录"]}
     card_path = f"{novel_base}/card.json"
 
-    card_data = read_file_safe(card_path)
-    content_data = read_file_safe(chapter_content)
-
-    card_sections = _inject_data("小说名片", card_path, card_data)
-    card_sections += _inject_data("章节正文", chapter_content, content_data)
-
-    card_task = f"""你的任务是更新小说名片。
-
-章节号：{chapter_num}
-更新名片文件：{card_path}
-
-{INJECTION_NOTE}{card_sections}
-"""
-
-    try:
-        await call_subagent("card-manager", card_task, parent_model=model_name)
+    result = update_novel_card(card_path, chapter_num, chapter_content)
+    if result["success"]:
         return {"card_updated": True}
-    except Exception as e:
-        logger.error(f"Card manager failed: {e}")
-        return {"errors": [f"Card manager failed: {e}"]}
+    else:
+        logger.error(f"Card update failed: {result['error']}")
+        return {"errors": [f"Card update failed: {result['error']}"]}
 
 
 async def post_process_sequential(state: NovelWorkflowState) -> dict[str, Any]:

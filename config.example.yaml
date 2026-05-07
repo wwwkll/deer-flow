@@ -38,6 +38,27 @@ models:
     # Whether the model supports vision
     supports_vision: false
 
+  # Local model configuration (e.g. LM Studio, Ollama)
+  # 使用本地模型时建议降低 temperature、减少 max_retries、添加重复惩罚
+  - name: local-model
+    display_name: Local Model
+    use: langchain_openai:ChatOpenAI
+    model: local-model-name
+    api_key: sk-key
+    base_url: http://localhost:1234/v1
+    request_timeout: 60000.0
+    max_retries: 1           # 本地模型建议减少重试次数（避免无限重试）
+    max_tokens: 80000        # 设置最大输出token数，防止无限生成（关键参数！）
+    temperature: 0.5         # 本地模型建议降低温度（0.5-0.6），减少随机性
+    supports_thinking: false
+    supports_vision: false
+    model_kwargs:
+      extra_body:
+        repetition_penalty: 1.2  # 重复惩罚，防止循环输出（推荐 1.15-1.3）
+        top_p: 0.9               # 限制采样范围
+        presence_penalty: 0.1    # 话题新鲜度惩罚，鼓励生成新内容
+        frequency_penalty: 0.2   # 词频惩罚，减少重复词汇使用
+
 # ============================================================================
 # Tool Groups Configuration
 # ============================================================================
@@ -225,18 +246,27 @@ title:
 # ============================================================================
 
 summarization:
+  # 是否启用对话历史自动总结（当对话 token 数接近上下文窗口上限时自动压缩旧消息）
   enabled: true
+  # 总结使用的模型，null 表示使用默认模型（推荐用轻量模型，节约成本）
   model_name: null
   trigger:
-    - type: tokens
-      value: 75000
+    # fraction: 上下文窗口百分比触发（推荐本地模型使用，自动适配不同上下文大小）
+    #   value: 0.85 表示对话 token 数达到上下文窗口的 85% 时触发总结
+    #   上下文窗口自动从 LM Studio / Ollama 的 /models 接口读取（context_length）
+    #   也可在模型配置中手动指定 context_window 字段
+    # tokens: 绝对 token 数触发（适合云端模型，需手动指定具体数值）
+    # messages: 消息数量触发
+    - type: fraction
+      value: 0.85
   keep:
     type: messages
-    value: 20
+    value: 10           # 总结后保留最近 N 条消息（不被压缩）
   trim_tokens_to_summarize:
+    # 总结时裁剪待压缩消息的 token 上限，fraction 表示占上下文窗口的百分比
     type: fraction
-    value: 0.9375  # 93.75% of model max_tokens, auto-adjusts per model
-  summary_prompt: null
+    value: 0.85
+  summary_prompt: null    # 自定义总结提示词，null 使用默认
   preserve_recent_skill_count: 5
   preserve_recent_skill_tokens: 25000
   preserve_recent_skill_tokens_per_skill: 5000
@@ -281,7 +311,8 @@ skill_evolution:
 
 subagents:
   timeout_seconds: 900
-  max_turns: 50
+  # 使用本地模型时建议降低 max_turns，防止无限循环
+  max_turns: 30
   # 工作流并行执行开关
   # true:  并行执行（适合线上模型，支持并发请求）
   # false: 串行执行（适合本地模型，避免并发导致的问题）
@@ -298,3 +329,21 @@ subagents:
 checkpointer:
   type: sqlite
   connection_string: checkpoints.db
+
+# ============================================================================
+# Global Variables Database Configuration
+# ============================================================================
+# 全局变量数据库配置，支持 SQLite（默认）和 PostgreSQL 两种后端
+# 
+# SQLite：零配置，适合单用户开发环境
+# PostgreSQL：高并发支持，适合多 Agent 同时写入的场景
+#
+# 如需使用 PostgreSQL，请先安装依赖：
+#   uv add psycopg[binary] psycopg-pool
+#
+global_variables:
+  # 数据库类型：sqlite | postgres
+  db_type: sqlite
+  # 连接字符串（SQLite 默认留空即可，使用 {DEER_FLOW_HOME}/global_variables.db）
+  # PostgreSQL 示例：postgresql://postgres:yuhan1014@localhost:5432/deerflow
+  connection_string: null

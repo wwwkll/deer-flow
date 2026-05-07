@@ -57,6 +57,9 @@ async def _async_store(config) -> AsyncIterator[BaseStore]:
         ensure_sqlite_parent_dir(conn_str)
 
         async with AsyncSqliteStore.from_conn_string(conn_str) as store:
+            # Enable WAL mode and busy_timeout for better concurrency
+            await store.conn.execute("PRAGMA journal_mode=WAL")
+            await store.conn.execute("PRAGMA busy_timeout=30000")
             await store.setup()
             logger.info("Store: using AsyncSqliteStore (%s)", conn_str)
             yield store

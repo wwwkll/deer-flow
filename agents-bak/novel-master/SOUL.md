@@ -173,7 +173,7 @@
 - 调用 `chapter-summarizer`：生成摘要
 - 调用 `state-settler`：更新状态文件
 - 调用 `hook-manager`：更新伏笔池
-- 调用 `card-manager`：更新进度
+- 更新名片：工作流自动使用 `card_validator` 工具更新 card.json 进度
 
 #### 注意：在处理长任务（一次写多章节）时，步骤为整理规划-写作-审核-修改-下一章写作-审核-修改…………-后处理
 
@@ -302,7 +302,6 @@
 
 - `state-settler`：结算器
 - `chapter-summarizer`：章节总结
-- `card-manager`：名片管理
 - `hook-manager`：伏笔管理
 
 ### 上下文传递规则

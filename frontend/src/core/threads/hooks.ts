@@ -209,6 +209,7 @@ export function useThreadStream({
       ? () => runMetadataStorageRef.current!
       : false,
     fetchStateHistory: { limit: 1 },
+    throttle: 1000,
     onCreated(meta) {
       handleStreamStart(meta.thread_id);
       setOnStreamThreadId(meta.thread_id);
@@ -302,6 +303,10 @@ export function useThreadStream({
   const sendInFlightRef = useRef(false);
   // Track message count before sending so we know when server has responded
   const prevMsgCountRef = useRef(thread.messages.length);
+  // Snapshot of messages before submitting a new message.
+  // Used to preserve messages that may be lost when a new stream starts
+  // because the backend checkpoint does not contain partially-generated messages.
+  const messageSnapshotRef = useRef<Message[]>([]);
 
   // Reset thread-local pending UI state when switching between threads so
   // optimistic messages and in-flight guards do not leak across chat views.
@@ -311,6 +316,7 @@ export function useThreadStream({
     prevMsgCountRef.current = 0;
     setOptimisticMessages([]);
     setIsUploading(false);
+    messageSnapshotRef.current = [];
   }, [threadId]);
 
   // Clear optimistic when server messages arrive (count increases)
@@ -339,6 +345,11 @@ export function useThreadStream({
 
       // Capture current count before showing optimistic messages
       prevMsgCountRef.current = thread.messages.length;
+
+      // Save a snapshot of current messages so we can restore any that are
+      // dropped when the new stream replaces stream.values with the backend
+      // checkpoint state (which may not contain partially-generated messages).
+      messageSnapshotRef.current = thread.messages;
 
       // Build optimistic files list with uploading status
       const optimisticFiles: FileInMessage[] = (message.files ?? []).map(
@@ -484,7 +495,7 @@ export function useThreadStream({
             threadId: threadId,
             streamSubgraphs: true,
             streamResumable: true,
-            multitaskStrategy: "rollback",
+            multitaskStrategy: "interrupt",
             config: {
               recursion_limit: 1000,
             },
@@ -520,13 +531,69 @@ export function useThreadStream({
   );
 
   // Merge thread with optimistic messages for display
-  const mergedThread =
-    optimisticMessages.length > 0
-      ? ({
-          ...thread,
-          messages: [...thread.messages, ...optimisticMessages],
-        } as typeof thread)
-      : thread;
+  // Also merge any messages from the snapshot that were dropped when the new
+  // stream started (because the backend checkpoint didn't contain partially
+  // generated messages from an interrupted run).
+  const mergedThread = (() => {
+    let messages = thread.messages;
+    const snapshot = messageSnapshotRef.current;
+
+    // If we have a snapshot with more messages than the current thread,
+    // some messages were lost when the new stream replaced stream.values.
+    // Restore them by merging the snapshot with the current messages.
+    if (snapshot.length > messages.length) {
+      const currentIds = new Set(messages.map((m) => m.id));
+      const missingMessages = snapshot.filter((m) => !currentIds.has(m.id));
+
+      if (missingMessages.length > 0) {
+        // Merge while preserving order: iterate through the snapshot and
+        // keep messages that are either in the current list or missing.
+        const merged: Message[] = [];
+        const currentIndexMap = new Map<string, number>();
+        messages.forEach((m, idx) => {
+          if (m.id) currentIndexMap.set(m.id, idx);
+        });
+
+        let currentIdx = 0;
+        for (const snapMsg of snapshot) {
+          const existingIndex = snapMsg.id
+            ? currentIndexMap.get(snapMsg.id)
+            : undefined;
+          if (existingIndex !== undefined) {
+            // Use the current version of this message (it may have been updated)
+            if (currentIdx <= existingIndex) {
+              const msg = messages[existingIndex];
+              if (msg) merged.push(msg);
+              currentIdx = existingIndex + 1;
+            }
+          } else {
+            // This message is missing from the current list, restore it
+            merged.push(snapMsg);
+          }
+        }
+
+        // Append any remaining current messages that weren't in the snapshot
+        while (currentIdx < messages.length) {
+          const msg = messages[currentIdx];
+          if (msg && !snapshot.find((m) => m.id === msg.id)) {
+            merged.push(msg);
+          }
+          currentIdx++;
+        }
+
+        messages = merged;
+      }
+    }
+
+    if (optimisticMessages.length > 0) {
+      messages = [...messages, ...optimisticMessages];
+    }
+
+    if (messages !== thread.messages) {
+      return { ...thread, messages } as typeof thread;
+    }
+    return thread;
+  })();
 
   return [mergedThread, sendMessage, isUploading] as const;
 }

@@ -1,10 +1,10 @@
-name: state-settler
 description: |
   结算器，负责将写作输出的事实变更合并到状态文件。
-  更新当前状态卡、待办事项、章节摘要汇总等。
-model: null
-tool_groups:
+  更新 当前状态卡.md、待办事项.md、章节摘要汇总.md 等。
+  当章节完成后需要更新状态时调用此Agent。
+tools:
   - file:read
   - file:write
-subagent_enabled: false
-max_concurrent_subagents: 0
+model: inherit
+max_turns: 60
+timeout_seconds: 1200

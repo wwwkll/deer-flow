@@ -94,7 +94,6 @@ DeerFlow 是一个开源的 super agent harness，本项目在其基础上二开
 | | novel-reviser | 根据审计报告修改正文 |
 | 状态管理类 | state-settler | 更新状态文件（位置、伏笔、摘要等） |
 | | chapter-summarizer | 生成章节摘要 |
-| | card-manager | 更新小说名片（card.json） |
 | | hook-manager | 管理伏笔池状态 |
 
 ### 自定义工具
@@ -195,12 +194,47 @@ DeerFlow 是一个开源的 super agent harness，本项目在其基础上二开
 现在写到哪了？当前状态是什么？
 ```
 
+## 数据库配置
+
+本项目支持 SQLite（默认）和 PostgreSQL 两种数据库后端存储全局变量数据。
+
+### SQLite（默认）
+
+零配置，数据存储在 `backend/.deer-flow/global_variables.db`，适合单用户开发环境。
+
+### PostgreSQL（高并发推荐）
+
+适合多 Agent 并发写入场景，彻底解决 `database is locked` 问题。
+
+**1. 安装 PostgreSQL 依赖**
+
+```bash
+cd backend
+uv add psycopg[binary] psycopg-pool
+```
+
+**2. 配置 `config.yaml`**
+
+```yaml
+global_variables:
+  db_type: postgres
+  connection_string: "postgresql://postgres:yuhan1014@localhost:5432/deerflow"
+```
+
+**3. 创建数据库**
+
+```bash
+# 使用 psql 创建数据库
+psql postgresql://postgres:yuhan1014@localhost:5432/postgres -c "CREATE DATABASE deerflow;"
+```
+
 ## 文档
 
 - [Agent/Skill/Tool 配置指南](二开准备/二开经验/Agent-Skill-Tool配置指南.md)
 - [测试用例](二开准备/二开需求文档/agent配置/测试用例.md)
 - [DeerFlow 配置指南](backend/docs/CONFIGURATION.md)
 - [DeerFlow 后端架构](backend/README.md)
+- [数据库表结构](二开准备/二开记录/数据库表结构.md)
 
 ## 安全使用
 

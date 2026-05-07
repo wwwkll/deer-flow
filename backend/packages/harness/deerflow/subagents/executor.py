@@ -300,7 +300,7 @@ class SubagentExecutor:
 
             # Build config with thread_id for sandbox access and recursion limit
             run_config: RunnableConfig = {
-                "recursion_limit": self.config.max_turns,
+                "recursion_limit": max(self.config.max_turns, 200),
             }
             context = {}
             if self.thread_id:

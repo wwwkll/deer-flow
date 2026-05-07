@@ -107,8 +107,10 @@ class DeerFlowSummarizationMiddleware(SummarizationMiddleware):
         preserve_recent_skill_count: int = 5,
         preserve_recent_skill_tokens: int = 25_000,
         preserve_recent_skill_tokens_per_skill: int = 5_000,
+        context_window: int | None = None,
         **kwargs,
     ) -> None:
+        self._context_window = context_window
         trim = kwargs.get("trim_tokens_to_summarize")
         if isinstance(trim, tuple) and len(trim) == 2:
             kwargs["trim_tokens_to_summarize"] = None
@@ -117,12 +119,12 @@ class DeerFlowSummarizationMiddleware(SummarizationMiddleware):
             max_input = self._resolve_max_tokens_for_fraction()
             if kind == "fraction" and max_input is not None:
                 resolved = int(max_input * value)
-                logger.info("Resolved trim_tokens_to_summarize fraction %.2f -> %d (max_tokens=%d)", value, resolved, max_input)
+                logger.info("Resolved trim_tokens_to_summarize fraction %.2f -> %d (context_window=%d)", value, resolved, max_input)
                 self.trim_tokens_to_summarize = resolved
             elif kind == "tokens":
                 self.trim_tokens_to_summarize = int(value)
             else:
-                logger.warning("Cannot resolve trim_tokens_to_summarize %s (max_tokens=%s); disabling trim", trim, max_input)
+                logger.warning("Cannot resolve trim_tokens_to_summarize %s (context_window=%s); disabling trim", trim, max_input)
                 self.trim_tokens_to_summarize = None
         else:
             super().__init__(*args, **kwargs)
@@ -133,11 +135,20 @@ class DeerFlowSummarizationMiddleware(SummarizationMiddleware):
         self._preserve_recent_skill_tokens = max(0, preserve_recent_skill_tokens)
         self._preserve_recent_skill_tokens_per_skill = max(0, preserve_recent_skill_tokens_per_skill)
 
+    def _get_profile_limits(self) -> int | None:
+        """Check context_window first, then fall back to parent logic (litellm profile)."""
+        if self._context_window is not None:
+            return self._context_window
+        return super()._get_profile_limits()
+
     def _resolve_max_tokens_for_fraction(self) -> int | None:
         """Resolve max tokens for fraction calculation.
 
-        Priority: profile.max_input_tokens > model.max_tokens > None.
+        Priority: context_window > profile.max_input_tokens > model.max_tokens > None.
         """
+        if self._context_window is not None:
+            return self._context_window
+
         profile_limit = self._get_profile_limits()
         if profile_limit is not None:
             return profile_limit

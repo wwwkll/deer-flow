@@ -17,6 +17,9 @@ dependencies = [
     "langgraph-sdk>=0.1.51",
     "markdown-to-mrkdwn>=0.3.1",
     "wecom-aibot-python-sdk>=0.1.6",
+    "psycopg[binary]>=3.3.4",
+    "psycopg-pool>=3.3.1",
+    "langgraph-checkpoint-postgres>=3.0.5",
 ]
 
 [dependency-groups]

@@ -2,12 +2,25 @@
 
 import logging
 from dataclasses import replace
+from pathlib import Path
+
+import yaml
 
 from deerflow.sandbox.security import is_host_bash_allowed
 from deerflow.subagents.builtins import BUILTIN_SUBAGENTS
 from deerflow.subagents.config import SubagentConfig
 
 logger = logging.getLogger(__name__)
+
+_SUBAGENT_CONFIG_FIELDS = {
+    "description",
+    "tools",
+    "disallowed_tools",
+    "skills",
+    "model",
+    "max_turns",
+    "timeout_seconds",
+}
 
 
 def _build_custom_subagent_config(name: str) -> SubagentConfig | None:
@@ -39,6 +52,53 @@ def _build_custom_subagent_config(name: str) -> SubagentConfig | None:
     )
 
 
+def _build_subagent_from_agents_dir(name: str) -> SubagentConfig | None:
+    """Build a SubagentConfig from backend/.deer-flow/agents/{name}/ directory.
+
+    Reads config.yaml for metadata (tools, model, etc.) and SOUL.md for
+    system_prompt. This provides a file-based alternative to the config.yaml
+    custom_agents section, keeping prompts and code separate.
+
+    Args:
+        name: The name of the custom subagent.
+
+    Returns:
+        SubagentConfig if the agent directory and required files exist, None otherwise.
+    """
+    from deerflow.config.paths import get_paths
+
+    agent_dir = get_paths().agent_dir(name)
+    if not agent_dir.exists():
+        return None
+
+    soul_path = agent_dir / "SOUL.md"
+    if not soul_path.exists():
+        return None
+
+    system_prompt = soul_path.read_text(encoding="utf-8").strip()
+    if not system_prompt:
+        return None
+
+    config_path = agent_dir / "config.yaml"
+    meta: dict = {}
+    if config_path.exists():
+        try:
+            with open(config_path, encoding="utf-8") as f:
+                meta = yaml.safe_load(f) or {}
+        except Exception as e:
+            logger.warning("Failed to parse subagent config %s: %s", config_path, e)
+
+    description = meta.pop("description", "")
+    fields = {k: v for k, v in meta.items() if k in _SUBAGENT_CONFIG_FIELDS}
+
+    return SubagentConfig(
+        name=name,
+        description=description,
+        system_prompt=system_prompt,
+        **fields,
+    )
+
+
 def get_subagent_config(name: str) -> SubagentConfig | None:
     """Get a subagent configuration by name, with config.yaml overrides applied.
 
@@ -53,10 +113,12 @@ def get_subagent_config(name: str) -> SubagentConfig | None:
     Returns:
         SubagentConfig if found (with any config.yaml overrides applied), None otherwise.
     """
-    # Step 1: Look up built-in, then fall back to custom_agents
+    # Step 1: Look up built-in, then custom_agents, then agents directory
     config = BUILTIN_SUBAGENTS.get(name)
     if config is None:
         config = _build_custom_subagent_config(name)
+    if config is None:
+        config = _build_subagent_from_agents_dir(name)
     if config is None:
         return None
 
@@ -125,7 +187,7 @@ def list_subagents() -> list[SubagentConfig]:
 
 
 def get_subagent_names() -> list[str]:
-    """Get all available subagent names (built-in + custom).
+    """Get all available subagent names (built-in + custom + agents directory).
 
     Returns:
         List of subagent names.
@@ -139,6 +201,17 @@ def get_subagent_names() -> list[str]:
     for custom_name in app_config.custom_agents:
         if custom_name not in names:
             names.append(custom_name)
+
+    # Merge agents from backend/.deer-flow/agents/ directory
+    from deerflow.config.paths import get_paths
+
+    agents_dir = get_paths().agents_dir
+    if agents_dir.exists():
+        for entry in agents_dir.iterdir():
+            if entry.is_dir() and (entry / "SOUL.md").exists():
+                agent_name = entry.name
+                if agent_name not in names:
+                    names.append(agent_name)
 
     return names
 

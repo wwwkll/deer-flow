@@ -1,7 +1,9 @@
 """Helper functions for workflow nodes to call subagents."""
 
+import json
 import logging
 import os
+from datetime import datetime, timezone
 from pathlib import Path
 
 logger = logging.getLogger(__name__)
@@ -117,3 +119,41 @@ async def call_subagent(
         return result.result or ""
     else:
         raise RuntimeError(f"Subagent {subagent_name} failed: {result.error}")
+
+
+def update_novel_card(
+    card_path: str,
+    chapter_num: int,
+    chapter_content: str = "",
+) -> dict:
+    """直接程序化更新 card.json，无需 LLM 子 agent。
+
+    更新字段：
+    - current_chapter: 设为 chapter_num
+    - word_count: 累加本章字数
+    - last_updated: 当前时间戳
+    - status: 设为 writing
+    """
+    try:
+        card_path_obj = Path(card_path)
+        if card_path_obj.exists():
+            card_data = json.loads(card_path_obj.read_text(encoding="utf-8"))
+        else:
+            card_data = {}
+
+        chapter_words = len(chapter_content.replace(" ", "").replace("\n", "")) if chapter_content else 0
+
+        if chapter_num > 0:
+            card_data["current_chapter"] = chapter_num
+        card_data["word_count"] = (card_data.get("word_count", 0)) + chapter_words
+        card_data["last_updated"] = datetime.now(timezone.utc).isoformat()
+        card_data["status"] = "writing"
+
+        card_path_obj.parent.mkdir(parents=True, exist_ok=True)
+        card_path_obj.write_text(json.dumps(card_data, ensure_ascii=False, indent=2), encoding="utf-8")
+
+        logger.info(f"[update_novel_card] Updated {card_path}: chapter={chapter_num}, +{chapter_words} words")
+        return {"success": True, "card_data": card_data}
+    except Exception as e:
+        logger.error(f"[update_novel_card] Failed to update {card_path}: {e}")
+        return {"success": False, "error": str(e)}

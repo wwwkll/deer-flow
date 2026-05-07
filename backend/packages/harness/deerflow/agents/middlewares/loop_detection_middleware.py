@@ -8,8 +8,9 @@ Detection strategy:
   2. Track recent hashes in a sliding window.
   3. If the same hash appears >= warn_threshold times, inject a
      "you are repeating yourself — wrap up" system message (once per hash).
-  4. If it appears >= hard_limit times, strip all tool_calls from the
-     response so the agent is forced to produce a final text answer.
+  4. If it appears >= hard_limit times, terminate the task immediately
+     by returning ``{"jump_to": "end"}`` to stop both task execution and
+     any further model output.
 """
 
 import hashlib
@@ -21,7 +22,7 @@ from copy import deepcopy
 from typing import override
 
 from langchain.agents import AgentState
-from langchain.agents.middleware import AgentMiddleware
+from langchain.agents.middleware import AgentMiddleware, hook_config
 from langchain_core.messages import HumanMessage
 from langgraph.runtime import Runtime
 
@@ -143,8 +144,8 @@ class LoopDetectionMiddleware(AgentMiddleware[AgentState]):
     Args:
         warn_threshold: Number of identical tool call sets before injecting
             a warning message. Default: 3.
-        hard_limit: Number of identical tool call sets before stripping
-            tool_calls entirely. Default: 5.
+        hard_limit: Number of identical tool call sets before forcing
+            termination. Default: 5.
         window_size: Size of the sliding window for tracking calls.
             Default: 20.
         max_tracked_threads: Maximum number of threads to track before
@@ -344,16 +345,27 @@ class LoopDetectionMiddleware(AgentMiddleware[AgentState]):
 
         return update
 
-    def _apply(self, state: AgentState, runtime: Runtime) -> dict | None:
+    @hook_config(can_jump_to=["end"])
+    @override
+    def after_model(self, state: AgentState, runtime: Runtime) -> dict | None:
         warning, hard_stop = self._track_and_check(state, runtime)
 
         if hard_stop:
-            # Strip tool_calls from the last AIMessage to force text output
+            # Terminate the task immediately by jumping to END.
+            # This stops both task execution and any further model output,
+            # preventing the model from continuing to stream after termination.
             messages = state.get("messages", [])
             last_msg = messages[-1]
             content = self._append_text(last_msg.content, warning or _HARD_STOP_MSG)
             stripped_msg = last_msg.model_copy(update=self._build_hard_stop_update(last_msg, content))
-            return {"messages": [stripped_msg]}
+            logger.error(
+                "Loop hard limit triggered — terminating task and model output immediately",
+                extra={"thread_id": self._get_thread_id(runtime)},
+            )
+            return {
+                "messages": [stripped_msg],
+                "jump_to": "end",
+            }
 
         if warning:
             # Inject as HumanMessage instead of SystemMessage to avoid
@@ -366,13 +378,30 @@ class LoopDetectionMiddleware(AgentMiddleware[AgentState]):
 
         return None
 
-    @override
-    def after_model(self, state: AgentState, runtime: Runtime) -> dict | None:
-        return self._apply(state, runtime)
-
+    @hook_config(can_jump_to=["end"])
     @override
     async def aafter_model(self, state: AgentState, runtime: Runtime) -> dict | None:
-        return self._apply(state, runtime)
+        # Reuse sync logic — no I/O involved in loop detection
+        warning, hard_stop = self._track_and_check(state, runtime)
+
+        if hard_stop:
+            messages = state.get("messages", [])
+            last_msg = messages[-1]
+            content = self._append_text(last_msg.content, warning or _HARD_STOP_MSG)
+            stripped_msg = last_msg.model_copy(update=self._build_hard_stop_update(last_msg, content))
+            logger.error(
+                "Loop hard limit triggered — terminating task and model output immediately",
+                extra={"thread_id": self._get_thread_id(runtime)},
+            )
+            return {
+                "messages": [stripped_msg],
+                "jump_to": "end",
+            }
+
+        if warning:
+            return {"messages": [HumanMessage(content=warning)]}
+
+        return None
 
     def reset(self, thread_id: str | None = None) -> None:
         """Clear tracking state. If thread_id given, clear only that thread."""

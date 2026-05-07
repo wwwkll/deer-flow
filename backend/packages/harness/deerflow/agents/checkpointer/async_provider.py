@@ -57,6 +57,9 @@ async def _async_checkpointer(config) -> AsyncIterator[Checkpointer]:
         conn_str = resolve_sqlite_conn_str(config.connection_string or "store.db")
         await asyncio.to_thread(ensure_sqlite_parent_dir, conn_str)
         async with AsyncSqliteSaver.from_conn_string(conn_str) as saver:
+            # Enable WAL mode and busy_timeout for better concurrency
+            await saver.conn.execute("PRAGMA journal_mode=WAL")
+            await saver.conn.execute("PRAGMA busy_timeout=30000")
             await saver.setup()
             yield saver
         return

@@ -7,7 +7,7 @@ from typing import Any
 from langgraph.graph import END, StateGraph
 
 from deerflow.config.subagents_config import get_subagents_app_config
-from deerflow.workflows.helpers import call_subagent, get_novel_base, normalize_chapter_group, read_file_safe
+from deerflow.workflows.helpers import call_subagent, get_novel_base, normalize_chapter_group, read_file_safe, update_novel_card
 from deerflow.workflows.registry import register_workflow
 from deerflow.workflows.states import NovelWorkflowState
 from my_tools.path_resolver import set_current_thread_id
@@ -46,21 +46,18 @@ def _resolve_chapter_content(novel_base: str, chapter_num: int, chapter_group: s
 
 
 def _inject(label: str, path: str, required: bool = True) -> str:
-    content = read_file_safe(path)
-    if content:
-        return f"## {label}（已注入，不要再用read_file读取）\n\n{content}\n"
+    # 提示词注入已禁用，让 Agent 自行读取文件
     if required:
-        return f"## {label}\n路径：{path}\n[未成功注入，请用read_file自行读取]\n"
+        return f"## {label}\n路径：{path}\n[请用read_file自行读取]\n"
     return f"## {label}\n路径：{path}\n[文件不存在，跳过]\n"
 
 
 def _inject_data(label: str, path: str, data: str | None) -> str:
-    if data:
-        return f"## {label}（已注入，不要再用read_file读取）\n\n{data}\n"
-    return f"## {label}\n路径：{path}\n[未成功注入，请用read_file自行读取]\n"
+    # 提示词注入已禁用，让 Agent 自行读取文件
+    return f"## {label}\n路径：{path}\n[请用read_file自行读取]\n"
 
 
-INJECTION_NOTE = '以下内容已为你注入，标注"已注入"的不要用read_file重复读取，因为上下文有限。\n标注"未成功注入"的，请用read_file按路径自行读取。\n\n'
+INJECTION_NOTE = '【重要提示】以下是需要参考的文件路径，请使用 read_file 工具自行读取：\n\n'
 
 
 async def _process_single_chapter_summary(
@@ -195,26 +192,14 @@ async def _process_single_chapter_card(
     card_path = f"{novel_base}/card.json"
 
     content_path = _resolve_chapter_content(novel_base, chapter_num, chapter_group, chapter_content)
-    content_data = read_file_safe(content_path) if content_path else None
-    card_data = read_file_safe(card_path)
+    content_data = read_file_safe(content_path) if content_path else ""
 
-    card_sections = _inject_data("小说名片", card_path, card_data)
-    card_sections += _inject_data("章节正文", content_path or "自动查找失败", content_data)
-
-    card_task = f"""你的任务是更新小说名片。
-
-章节号：{chapter_num}
-更新名片文件：{card_path}
-
-{INJECTION_NOTE}{card_sections}
-"""
-
-    try:
-        await call_subagent("card-manager", card_task, parent_model=model_name)
+    result = update_novel_card(card_path, chapter_num, content_data or "")
+    if result["success"]:
         return {"chapter_num": chapter_num, "card_updated": True}
-    except Exception as e:
-        logger.error(f"Card manager failed for chapter {chapter_num}: {e}")
-        return {"chapter_num": chapter_num, "errors": [f"Card manager failed: {e}"]}
+    else:
+        logger.error(f"Card update failed for chapter {chapter_num}: {result['error']}")
+        return {"chapter_num": chapter_num, "errors": [f"Card update failed: {result['error']}"]}
 
 
 async def _process_single_chapter_sequential(

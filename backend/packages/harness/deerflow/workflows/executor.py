@@ -57,7 +57,8 @@ class WorkflowExecutor:
         result.status = WorkflowStatus.RUNNING
         result.started_at = datetime.now()
 
-        logger.info(f"[WORKFLOW_EXECUTOR] Executing workflow={self.workflow_name} params_keys={list(params.keys())} model_name={params.get('model_name')}")
+        logger.info(f"[WORKFLOW_EXECUTOR] Executing workflow={self.workflow_name} params={params} model_name={params.get('model_name')}")
+        logger.info(f"[WORKFLOW_EXECUTOR] 参数详情: chapter_num={params.get('chapter_num')}, chapter_group={params.get('chapter_group')}, novel_name={params.get('novel_name')}")
 
         try:
             workflow = self.workflow_factory()

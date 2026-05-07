@@ -77,11 +77,15 @@ def _create_summarization_middleware() -> DeerFlowSummarizationMiddleware | None
         # Falls back to default model if not explicitly specified
         model = create_chat_model(thinking_enabled=False)
 
+    # Resolve context_window: config explicit > auto-detect from provider API
+    context_window = _resolve_context_window()
+
     # Prepare kwargs
     kwargs = {
         "model": model,
         "trigger": trigger,
         "keep": keep,
+        "context_window": context_window,
     }
 
     if config.trim_tokens_to_summarize is not None:
@@ -115,6 +119,52 @@ def _create_summarization_middleware() -> DeerFlowSummarizationMiddleware | None
         preserve_recent_skill_tokens=config.preserve_recent_skill_tokens,
         preserve_recent_skill_tokens_per_skill=config.preserve_recent_skill_tokens_per_skill,
     )
+
+
+def _resolve_context_window() -> int | None:
+    """Resolve context_window from config or auto-detect from provider API.
+
+    Priority:
+    1. Explicit context_window in model config
+    2. Auto-detect from {base_url}/models (LM Studio / Ollama compatible)
+    """
+    app_config = get_app_config()
+    default_model = app_config.models[0] if app_config.models else None
+    if default_model is None:
+        return None
+
+    if default_model.context_window is not None:
+        return default_model.context_window
+
+    base_url = getattr(default_model, "base_url", None)
+    if base_url:
+        detected = _auto_detect_context_window(base_url)
+        if detected is not None:
+            return detected
+
+    return 32768
+
+
+def _auto_detect_context_window(base_url: str) -> int | None:
+    """Query {base_url}/models to get context_length (works for LM Studio, Ollama, etc.)."""
+    try:
+        import urllib.request
+        import json
+
+        url = f"{base_url.rstrip('/')}/models"
+        req = urllib.request.Request(url, method="GET")
+        req.add_header("Content-Type", "application/json")
+        with urllib.request.urlopen(req, timeout=5) as resp:
+            data = json.loads(resp.read().decode())
+            models = data.get("data", [])
+            if models and isinstance(models, list) and len(models) > 0:
+                ctx = models[0].get("context_length")
+                if isinstance(ctx, int) and ctx > 0:
+                    logger.info("Auto-detected context_window=%d from %s", ctx, url)
+                    return ctx
+    except Exception:
+        logger.debug("Could not auto-detect context_window from %s/models", base_url.rstrip("/"))
+    return None
 
 
 def _create_todo_list_middleware(is_plan_mode: bool) -> TodoMiddleware | None:

@@ -78,22 +78,18 @@ async def organize_world(state: NovelWorkflowState) -> dict[str, Any]:
     bible_path = f"{novel_base}/00-世界观/故事圣经.md"
 
     def _inject(label: str, path: str) -> str:
-        content = read_file_safe(path)
+        # 提示词注入已禁用，让 Agent 自行读取文件
         rel_path = path.replace(novel_base + "/", "") if novel_base else path
-        if content:
-            return f"## {label}（【已注入】{rel_path} —— 严禁使用read_file重复读取，内容已完整提供）\n\n{content}\n"
-        return f"## {label}\n路径：{path}（相对路径：{rel_path}）\n[未成功注入，请用read_file自行读取]\n"
+        return f"## {label}\n路径：{path}（相对路径：{rel_path}）\n[请用read_file自行读取]\n"
 
     sections = _inject("小说名片", card_path)
     sections += _inject("当前状态", state_path)
     sections += _inject("章节细纲", outline_path)
     sections += _inject("故事圣经", bible_path)
 
-    task = f"""你的任务是整理第{chapter_num}章的世界观参考。
+    task = f"""你的任务是整理第{chapter_group}章组的世界观参考。
 
-【重要提示】以下内容已直接注入到你的上下文中：
-- 标注"【已注入】"的文件，内容已完整提供，严禁使用read_file工具重复读取，否则将严重浪费上下文窗口
-- 标注"[未成功注入]"的文件，请按提供的路径使用read_file自行读取
+【重要提示】以下是需要参考的文件路径，请使用 read_file 工具自行读取：
 
 {sections}
 
@@ -129,22 +125,18 @@ async def organize_characters(state: NovelWorkflowState) -> dict[str, Any]:
     matrix_path = f"{novel_base}/00-世界观/角色矩阵.md"
 
     def _inject(label: str, path: str) -> str:
-        content = read_file_safe(path)
+        # 提示词注入已禁用，让 Agent 自行读取文件
         rel_path = path.replace(novel_base + "/", "") if novel_base else path
-        if content:
-            return f"## {label}（【已注入】{rel_path} —— 严禁使用read_file重复读取，内容已完整提供）\n\n{content}\n"
-        return f"## {label}\n路径：{path}（相对路径：{rel_path}）\n[未成功注入，请用read_file自行读取]\n"
+        return f"## {label}\n路径：{path}（相对路径：{rel_path}）\n[请用read_file自行读取]\n"
 
     sections = _inject("小说名片", card_path)
     sections += _inject("当前状态", state_path)
     sections += _inject("章节细纲", outline_path)
     sections += _inject("角色矩阵", matrix_path)
 
-    task = f"""你的任务是整理第{chapter_num}章的人物参考。
+    task = f"""你的任务是整理第{chapter_group}章组的人物参考。
 
-【重要提示】以下内容已直接注入到你的上下文中：
-- 标注"【已注入】"的文件，内容已完整提供，严禁使用read_file工具重复读取，否则将严重浪费上下文窗口
-- 标注"[未成功注入]"的文件，请按提供的路径使用read_file自行读取
+【重要提示】以下是需要参考的文件路径，请使用 read_file 工具自行读取：
 
 {sections}
 
@@ -180,22 +172,18 @@ async def organize_items(state: NovelWorkflowState) -> dict[str, Any]:
     bible_path = f"{novel_base}/00-世界观/故事圣经.md"
 
     def _inject(label: str, path: str) -> str:
-        content = read_file_safe(path)
+        # 提示词注入已禁用，让 Agent 自行读取文件
         rel_path = path.replace(novel_base + "/", "") if novel_base else path
-        if content:
-            return f"## {label}（【已注入】{rel_path} —— 严禁使用read_file重复读取，内容已完整提供）\n\n{content}\n"
-        return f"## {label}\n路径：{path}（相对路径：{rel_path}）\n[未成功注入，请用read_file自行读取]\n"
+        return f"## {label}\n路径：{path}（相对路径：{rel_path}）\n[请用read_file自行读取]\n"
 
     sections = _inject("小说名片", card_path)
     sections += _inject("当前状态", state_path)
     sections += _inject("章节细纲", outline_path)
     sections += _inject("故事圣经", bible_path)
 
-    task = f"""你的任务是整理第{chapter_num}章的道具和技能参考。
+    task = f"""你的任务是整理第{chapter_group}章组的道具和技能参考。
 
-【重要提示】以下内容已直接注入到你的上下文中：
-- 标注"【已注入】"的文件，内容已完整提供，严禁使用read_file工具重复读取，否则将严重浪费上下文窗口
-- 标注"[未成功注入]"的文件，请按提供的路径使用read_file自行读取
+【重要提示】以下是需要参考的文件路径，请使用 read_file 工具自行读取：
 
 {sections}
 
@@ -224,17 +212,13 @@ async def organize_storyline(state: NovelWorkflowState) -> dict[str, Any]:
     output_path = f"{novel_base}/02-正文/{chapter_group}/_task/故事线参考.md"
 
     chapters_dir = f"{novel_base}/01-规划/chapters"
+    outline_sections = []
     try:
         outline_files = sorted([f.name for f in Path(chapters_dir).glob("*-细纲.md")])
-        outline_sections = []
         for fname in outline_files:
             fpath = f"{chapters_dir}/{fname}"
-            content = read_file_safe(fpath)
             rel_path = fpath.replace(novel_base + "/", "") if novel_base else fpath
-            if content:
-                outline_sections.append(f"## {fname}（【已注入】{rel_path} —— 严禁使用read_file重复读取，内容已完整提供）\n\n{content}\n")
-            else:
-                outline_sections.append(f"## {fname}\n路径：{fpath}（相对路径：{rel_path}）\n[未成功注入，请用read_file自行读取]\n")
+            outline_sections.append(f"## {fname}\n路径：{fpath}（相对路径：{rel_path}）\n[请用read_file自行读取]\n")
     except Exception as e:
         logger.warning(f"Failed to scan chapters dir: {e}")
         outline_sections = []
@@ -245,21 +229,17 @@ async def organize_storyline(state: NovelWorkflowState) -> dict[str, Any]:
     state_path = f"{novel_base}/03-状态/当前状态卡.md"
 
     def _inject(label: str, path: str) -> str:
-        content = read_file_safe(path)
+        # 提示词注入已禁用，让 Agent 自行读取文件
         rel_path = path.replace(novel_base + "/", "") if novel_base else path
-        if content:
-            return f"## {label}（【已注入】{rel_path} —— 严禁使用read_file重复读取，内容已完整提供）\n\n{content}\n"
-        return f"## {label}\n路径：{path}（相对路径：{rel_path}）\n[未成功注入，请用read_file自行读取]\n"
+        return f"## {label}\n路径：{path}（相对路径：{rel_path}）\n[请用read_file自行读取]\n"
 
     sections = _inject("小说名片", card_path)
     sections += _inject("当前状态", state_path)
     sections += outlines_content
 
-    task = f"""你的任务是整理第{chapter_num}章的故事线参考。
+    task = f"""你的任务是整理第{chapter_group}章组的故事线参考。
 
-【重要提示】以下内容已直接注入到你的上下文中：
-- 标注"【已注入】"的文件，内容已完整提供，严禁使用read_file工具重复读取，否则将严重浪费上下文窗口
-- 标注"[未成功注入]"的文件，请按提供的路径使用read_file自行读取
+【重要提示】以下是需要参考的文件路径，请使用 read_file 工具自行读取：
 
 {sections}
 
@@ -360,22 +340,66 @@ def _create_parallel_workflow() -> StateGraph:
 
     workflow.set_entry_point("confirm_chapter")
     workflow.add_edge("confirm_chapter", "create_task_folder")
-    workflow.add_edge("create_task_folder", "assemble_context")
 
     # Parallel organize nodes - all start after create_task_folder
-    def start_organize_parallel(state: NovelWorkflowState) -> list[Send]:
-        return [
-            Send("organize_world", state),
-            Send("organize_characters", state),
-            Send("organize_items", state),
-            Send("organize_storyline", state),
+    # Check if output files already exist, skip if they do
+    def start_organize_parallel(state: NovelWorkflowState) -> list[Send] | str:
+        chapter_group = state.get("chapter_group", "")
+        thread_id = state.get("thread_id")
+        novel_base = get_novel_base(thread_id=thread_id)
+        
+        if not novel_base:
+            logger.warning("Cannot get novel_base, executing all organize nodes")
+            return [
+                Send("organize_world", state),
+                Send("organize_characters", state),
+                Send("organize_items", state),
+                Send("organize_storyline", state),
+            ]
+        
+        task_dir = Path(f"{novel_base}/02-正文/{chapter_group}/_task")
+        
+        # Define file mappings: (node_name, filename)
+        organize_tasks = [
+            ("organize_world", "世界观参考.md"),
+            ("organize_characters", "人物参考.md"),
+            ("organize_items", "道具参考.md"),
+            ("organize_storyline", "故事线参考.md"),
         ]
+        
+        sends = []
+        for node_name, filename in organize_tasks:
+            file_path = task_dir / filename
+            if file_path.exists():
+                logger.info(f"Skipping {node_name}: {file_path} already exists")
+            else:
+                logger.info(f"Adding {node_name}: {file_path} not found")
+                sends.append(Send(node_name, state))
+        
+        if not sends:
+            logger.info("All organize files already exist, skipping to assemble_context")
+            return "assemble_context"
+        
+        return sends
 
     workflow.add_conditional_edges("create_task_folder", start_organize_parallel)
     workflow.add_edge(["organize_world", "organize_characters", "organize_items", "organize_storyline"], "assemble_context")
     workflow.add_edge("assemble_context", END)
 
     return workflow.compile()
+
+
+def _check_file_exists(state: NovelWorkflowState, filename: str) -> bool:
+    """Check if a reference file already exists for the current chapter."""
+    chapter_group = state.get("chapter_group", "")
+    thread_id = state.get("thread_id")
+    novel_base = get_novel_base(thread_id=thread_id)
+    
+    if not novel_base:
+        return False
+    
+    file_path = Path(f"{novel_base}/02-正文/{chapter_group}/_task/{filename}")
+    return file_path.exists()
 
 
 def _create_sequential_workflow() -> StateGraph:
@@ -392,10 +416,36 @@ def _create_sequential_workflow() -> StateGraph:
 
     workflow.set_entry_point("confirm_chapter")
     workflow.add_edge("confirm_chapter", "create_task_folder")
-    workflow.add_edge("create_task_folder", "organize_world")
-    workflow.add_edge("organize_world", "organize_characters")
-    workflow.add_edge("organize_characters", "organize_items")
-    workflow.add_edge("organize_items", "organize_storyline")
+    
+    # Sequential flow with file existence checks
+    def route_after_task_folder(state: NovelWorkflowState) -> str:
+        if _check_file_exists(state, "世界观参考.md"):
+            logger.info("Skipping organize_world: 世界观参考.md already exists")
+            return "organize_characters"
+        return "organize_world"
+    
+    def route_after_world(state: NovelWorkflowState) -> str:
+        if _check_file_exists(state, "人物参考.md"):
+            logger.info("Skipping organize_characters: 人物参考.md already exists")
+            return "organize_items"
+        return "organize_characters"
+    
+    def route_after_characters(state: NovelWorkflowState) -> str:
+        if _check_file_exists(state, "道具参考.md"):
+            logger.info("Skipping organize_items: 道具参考.md already exists")
+            return "organize_storyline"
+        return "organize_items"
+    
+    def route_after_items(state: NovelWorkflowState) -> str:
+        if _check_file_exists(state, "故事线参考.md"):
+            logger.info("Skipping organize_storyline: 故事线参考.md already exists")
+            return "assemble_context"
+        return "organize_storyline"
+    
+    workflow.add_conditional_edges("create_task_folder", route_after_task_folder)
+    workflow.add_conditional_edges("organize_world", route_after_world)
+    workflow.add_conditional_edges("organize_characters", route_after_characters)
+    workflow.add_conditional_edges("organize_items", route_after_items)
     workflow.add_edge("organize_storyline", "assemble_context")
     workflow.add_edge("assemble_context", END)
 

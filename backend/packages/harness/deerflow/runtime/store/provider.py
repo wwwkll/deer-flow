@@ -69,6 +69,9 @@ def _sync_store_cm(config) -> Iterator[BaseStore]:
         ensure_sqlite_parent_dir(conn_str)
 
         with SqliteStore.from_conn_string(conn_str) as store:
+            # Enable WAL mode and busy_timeout for better concurrency
+            store.conn.execute("PRAGMA journal_mode=WAL")
+            store.conn.execute("PRAGMA busy_timeout=30000")
             store.setup()
             logger.info("Store: using SqliteStore (%s)", conn_str)
             yield store

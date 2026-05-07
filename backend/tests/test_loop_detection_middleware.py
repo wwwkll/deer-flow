@@ -190,6 +190,8 @@ class TestLoopDetection:
         assert isinstance(msgs[0], AIMessage)
         assert msgs[0].tool_calls == []
         assert _HARD_STOP_MSG in msgs[0].content
+        # Hard stop should include jump_to="end" to terminate task execution
+        assert result.get("jump_to") == "end"
 
     def test_different_calls_dont_trigger(self):
         mw = LoopDetectionMiddleware(warn_threshold=2)
@@ -380,6 +382,8 @@ class TestHardStopWithListContent:
         assert len(msg.content) == 3
         assert msg.content[2]["type"] == "text"
         assert _HARD_STOP_MSG in msg.content[2]["text"]
+        # Hard stop should include jump_to="end" to terminate task execution
+        assert result.get("jump_to") == "end"
 
     def test_hard_stop_with_none_content(self):
         """Hard stop on None content should produce a plain string."""
@@ -396,6 +400,7 @@ class TestHardStopWithListContent:
         msg = result["messages"][0]
         assert isinstance(msg.content, str)
         assert _HARD_STOP_MSG in msg.content
+        assert result.get("jump_to") == "end"
 
     def test_hard_stop_with_str_content(self):
         """Hard stop on str content should concatenate the stop message."""
@@ -412,6 +417,7 @@ class TestHardStopWithListContent:
         assert isinstance(msg.content, str)
         assert msg.content.startswith("thinking...")
         assert _HARD_STOP_MSG in msg.content
+        assert result.get("jump_to") == "end"
 
     def test_hard_stop_clears_raw_tool_call_metadata(self):
         """Forced-stop messages must not retain provider-level raw tool-call payloads."""
@@ -451,6 +457,7 @@ class TestHardStopWithListContent:
         assert "tool_calls" not in msg.additional_kwargs
         assert "function_call" not in msg.additional_kwargs
         assert msg.response_metadata["finish_reason"] == "stop"
+        assert result.get("jump_to") == "end"
 
 
 class TestToolFrequencyDetection:
@@ -518,6 +525,7 @@ class TestToolFrequencyDetection:
         assert msg.tool_calls == []
         assert "FORCED STOP" in msg.content
         assert "read_file" in msg.content
+        assert result.get("jump_to") == "end"
 
     def test_different_tools_tracked_independently(self):
         """read_file and bash should have independent frequency counters."""
@@ -636,3 +644,4 @@ class TestToolFrequencyDetection:
         msg = result["messages"][0]
         assert isinstance(msg, AIMessage)
         assert _HARD_STOP_MSG in msg.content
+        assert result.get("jump_to") == "end"

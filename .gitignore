@@ -65,3 +65,7 @@ config.yaml.bak
 /frontend/playwright-report/
 .gstack/
 .worktrees
+
+# Development docs with sensitive info (DB passwords, etc.)
+二开准备/二开记录/数据库表结构.md
+二开准备/二开需求文档/数据库迁移-SQLite转PostgreSQL.md

@@ -108,11 +108,13 @@ async def browse_directory(
             if item.name.startswith("."):
                 continue
 
+            safe_name = item.name.encode("utf-8", errors="replace").decode("utf-8", errors="replace")
+
             if item.is_dir():
                 entries.append(
                     DirectoryEntry(
-                        name=item.name,
-                        path=f"{path}/{item.name}",
+                        name=safe_name,
+                        path=f"{path}/{safe_name}",
                         isDirectory=True,
                     )
                 )
@@ -121,8 +123,8 @@ async def browse_directory(
                     if item.suffix.lower() in allowed_extensions:
                         entries.append(
                             DirectoryEntry(
-                                name=item.name,
-                                path=f"{path}/{item.name}",
+                                name=safe_name,
+                                path=f"{path}/{safe_name}",
                                 isDirectory=False,
                             )
                         )
@@ -130,8 +132,8 @@ async def browse_directory(
                     if item.suffix.lower() in SUPPORTED_EXTENSIONS:
                         entries.append(
                             DirectoryEntry(
-                                name=item.name,
-                                path=f"{path}/{item.name}",
+                                name=safe_name,
+                                path=f"{path}/{safe_name}",
                                 isDirectory=False,
                             )
                         )
@@ -178,7 +180,10 @@ async def read_file(thread_id: str, path: str):
         if actual_path.stat().st_size > MAX_FILE_SIZE:
             raise HTTPException(status_code=400, detail="File too large (max 10MB)")
 
-        content = actual_path.read_text(encoding="utf-8")
+        try:
+            content = actual_path.read_text(encoding="utf-8")
+        except UnicodeDecodeError:
+            content = actual_path.read_text(encoding="gbk", errors="replace")
         stat = actual_path.stat()
 
         return ReadResponse(

@@ -1,10 +1,10 @@
-name: novel-writer
 description: |
   长篇网文写手，负责根据写作任务汇总撰写小说正文。
   读取细纲、世界观、人物、道具等参考信息写正文。
-model: null
-tool_groups:
-  - novel:reader
+  当需要写小说章节时调用此Agent。
+tools:
+  - novel_reader
   - file:write
-subagent_enabled: false
-max_concurrent_subagents: 0
+model: inherit
+max_turns: 80
+timeout_seconds: 1800

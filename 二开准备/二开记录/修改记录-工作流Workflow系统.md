@@ -1,9 +1,59 @@
 # 工作流 (Workflow) 系统开发记录
 
+---
+
+## v1.1 - 文件检查优化
+
+**日期**: 2026-05-05
+**功能**: organize workflow 文件检查优化
+**开发者**: AI Assistant
+
+### 修改内容
+
+**问题**：每次调用 organize workflow 时，都会重新执行所有4个并行 agent（世界观、人物、道具、故事线），即使某些参考文件已经生成过，造成不必要的 LLM 调用和时间浪费。
+
+**解决方案**：在调用每个 agent 前检查对应的参考文件是否已存在，如果已存在则跳过该 agent，但最后的 `assemble_context`（合并）仍会重新执行。
+
+### 修改文件
+
+| 文件路径 | 修改内容 |
+|----------|----------|
+| `backend/packages/harness/deerflow/workflows/novel_organize.py` | 添加文件存在性检查逻辑 |
+
+### 技术实现
+
+1. **Parallel 模式**：
+   - 修改 `start_organize_parallel` 函数，返回类型改为 `list[Send] | str`
+   - 检查 `_task/` 目录下4个参考文件是否存在
+   - 如果所有文件都存在，返回 `"assemble_context"` 直接跳转到合并节点
+   - 否则只返回需要执行的 Send 列表
+
+2. **Sequential 模式**：
+   - 新增 `_check_file_exists` 辅助函数
+   - 使用 conditional_edges 实现跳过逻辑
+   - 每个节点执行前检查对应文件，存在则跳转到下一个节点
+
+### 文件检查映射
+
+| 节点名 | 输出文件 |
+|--------|----------|
+| organize_world | 世界观参考.md |
+| organize_characters | 人物参考.md |
+| organize_items | 道具参考.md |
+| organize_storyline | 故事线参考.md |
+
+### 测试结果
+
+- 模块导入测试 ✅
+- Workflow 创建测试 ✅
+
+---
+
+## v1.0 - 初始版本
+
 **日期**: 2026-04-30
 **功能**: 确定性工作流引擎
 **开发者**: AI Assistant
-**版本**: v1.0
 
 ---
 

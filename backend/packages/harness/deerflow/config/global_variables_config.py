@@ -1,6 +1,10 @@
 """Configuration for global variables mechanism."""
 
+from typing import Literal
+
 from pydantic import BaseModel, Field
+
+GlobalVariablesDBType = Literal["sqlite", "postgres"]
 
 
 class GlobalVariablesConfig(BaseModel):
@@ -31,6 +35,18 @@ class GlobalVariablesConfig(BaseModel):
         ge=100,
         le=10000,
         description="Maximum total length of injected variables section in prompt",
+    )
+    db_type: GlobalVariablesDBType = Field(
+        default="sqlite",
+        description="Database backend type for global variables. "
+        "'sqlite' uses a local file (default). "
+        "'postgres' uses PostgreSQL for better concurrency support.",
+    )
+    connection_string: str | None = Field(
+        default=None,
+        description="Connection string for the database backend. "
+        "For sqlite, defaults to '{DEER_FLOW_HOME}/global_variables.db'. "
+        "For postgres, use 'postgresql://user:pass@host:port/db' format.",
     )
 
 

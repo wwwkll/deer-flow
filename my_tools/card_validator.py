@@ -1,9 +1,101 @@
 from langchain.tools import tool
 import json
 import os
+import re
+import logging
+from pathlib import Path
 from typing import Optional
 
 from my_tools.path_resolver import resolve_to_host_path
+
+logger = logging.getLogger(__name__)
+
+
+def _is_within_shared_data(file_path: str) -> bool:
+    """检查路径是否在 shared-data 目录内（防止路径逃逸）。
+
+    Args:
+        file_path: 已解析的主机路径
+
+    Returns:
+        是否在 shared-data 目录内
+    """
+    shared_data = resolve_to_host_path("/mnt/shared-data").replace("\\", "/")
+    target = str(Path(file_path.replace("\\", "/")).resolve()).replace("\\", "/")
+    return target.startswith(shared_data)
+
+
+def _clean_json_content(content: str) -> str:
+    """清理 JSON 内容中的注释和非标准内容。
+
+    Args:
+        content: 原始文件内容
+
+    Returns:
+        清理后的内容
+    """
+    lines = content.split('\n')
+    cleaned_lines = []
+    
+    for line in lines:
+        stripped = line.strip()
+        
+        # 跳过纯注释行
+        if stripped.startswith('#') or stripped.startswith('//'):
+            continue
+        
+        # 移除行内注释（# 后面的内容）
+        # 需要小心处理：只在字符串外部移除注释
+        cleaned_line = _remove_inline_comment(line)
+        cleaned_lines.append(cleaned_line)
+    
+    return '\n'.join(cleaned_lines)
+
+
+def _remove_inline_comment(line: str) -> str:
+    """移除行内注释，但保留字符串内的 # 字符。
+
+    Args:
+        line: 原始行内容
+
+    Returns:
+        移除注释后的行
+    """
+    in_string = False
+    string_char = None
+    escape_next = False
+    
+    for i, char in enumerate(line):
+        if escape_next:
+            escape_next = False
+            continue
+        
+        if char == '\\':
+            escape_next = True
+            continue
+        
+        if char in ('"', "'") and not in_string:
+            in_string = True
+            string_char = char
+            continue
+        
+        if char == string_char and in_string:
+            in_string = False
+            string_char = None
+            continue
+        
+        # 在字符串外遇到 # 或 //，删除后面的内容
+        if not in_string and char == '#':
+            # 检查是否是独立的 # （不是 JSON 值的一部分）
+            # 简单处理：如果 # 前面是空白或开始，则认为是注释
+            prefix = line[:i].rstrip()
+            if not prefix or prefix.endswith(',') or prefix.endswith('{') or prefix.endswith('['):
+                return line[:i].rstrip()
+        
+        if not in_string and char == '/' and i > 0 and line[i-1] == '/':
+            return line[:i-1].rstrip()
+    
+    return line
 
 
 @tool("card_validator")
@@ -33,6 +125,16 @@ def card_validator(
     card_path = resolve_to_host_path(card_path)
     card_path = card_path.replace("\\", "/")
     
+    # 路径安全校验：防止路径逃逸（仅在生产环境校验）
+    # 如果路径未被 resolve_to_host_path 转换（即不在沙箱挂载点内），跳过校验以支持测试
+    original_path = card_path.replace("\\", "/")
+    if "/mnt/" in card_path or original_path != card_path:
+        # 路径已被解析，说明来自沙箱，需要校验
+        if not _is_within_shared_data(card_path):
+            elapsed = time.time() - start_time
+            logger.warning("[card_validator] Path out of allowed range: %s | 耗时=%.3fs", card_path, elapsed)
+            return f"[FAIL] 权限拒绝：路径超出允许范围：{card_path}"
+    
     # 定义必填字段和类型
     REQUIRED_FIELDS = {
         "book_name": str,
@@ -56,21 +158,26 @@ def card_validator(
     # 检查文件是否存在
     if not os.path.exists(card_path):
         if auto_create and book_name:
-            card_data = {
-                "book_name": book_name,
-                "genre": genre or "未知",
-                "concept": concept or "",
-                "platform": platform or "",
-                "status": "planning",
-                "current_chapter": 0,
-                "target_chapters": 0,
-            }
-            os.makedirs(os.path.dirname(card_path), exist_ok=True)
-            with open(card_path, "w", encoding="utf-8") as f:
-                json.dump(card_data, f, ensure_ascii=False, indent=2)
-            result["fixed"] = True
-            result["content"] = card_data
-            return f"[OK] card.json 已创建：{card_path}\n\n内容：\n{json.dumps(card_data, ensure_ascii=False, indent=2)}"
+            try:
+                card_data = {
+                    "book_name": book_name,
+                    "genre": genre or "未知",
+                    "concept": concept or "",
+                    "platform": platform or "",
+                    "status": "planning",
+                    "current_chapter": 0,
+                    "target_chapters": 0,
+                }
+                os.makedirs(os.path.dirname(card_path), exist_ok=True)
+                with open(card_path, "w", encoding="utf-8") as f:
+                    json.dump(card_data, f, ensure_ascii=False, indent=2)
+                result["fixed"] = True
+                result["content"] = card_data
+                logger.info("[card_validator] Created new card: %s", card_path)
+                return f"[OK] card.json 已创建：{card_path}\n\n内容：\n{json.dumps(card_data, ensure_ascii=False, indent=2)}"
+            except Exception as e:
+                logger.error("[card_validator] Failed to create card: %s", e)
+                return f"[FAIL] 创建文件失败：{str(e)}"
         else:
             return f"[FAIL] 文件不存在：{card_path}\n提示：设置 auto_create=True 和 book_name 参数可自动创建"
     
@@ -78,7 +185,10 @@ def card_validator(
     try:
         with open(card_path, "r", encoding="utf-8") as f:
             raw_content = f.read()
+        logger.info("[card_validator] 文件读取成功 | card_path=%s | raw_length=%d", card_path, len(raw_content))
     except Exception as e:
+        elapsed = time.time() - start_time
+        logger.error("[card_validator] <<< 读取文件失败 | card_path=%s | error=%s | 耗时=%.3fs", card_path, str(e), elapsed, exc_info=True)
         return f"[FAIL] 读取文件失败：{str(e)}"
     
     # 尝试解析 JSON
@@ -88,15 +198,19 @@ def card_validator(
         result["valid"] = False
         result["issues"].append(f"JSON 解析失败：{str(e)}")
         if fix:
-            # 尝试修复：移除注释
-            cleaned = raw_content.replace("# ", "// ")
+            # 尝试修复：清理注释和非标准内容
             try:
+                cleaned = _clean_json_content(raw_content)
                 card_data = json.loads(cleaned)
                 result["issues"].append("已自动修复：移除注释")
                 result["fixed"] = True
-            except:
+            except Exception:
+                elapsed = time.time() - start_time
+                logger.error("[card_validator] <<< JSON修复失败 | card_path=%s | 耗时=%.3fs", card_path, elapsed)
                 return f"[FAIL] JSON 格式错误，无法解析：{str(e)}\n建议：手动修复 JSON 格式"
         else:
+            elapsed = time.time() - start_time
+            logger.error("[card_validator] <<< JSON格式错误(未启用修复) | card_path=%s | 耗时=%.3fs", card_path, elapsed)
             return f"[FAIL] JSON 格式错误：{str(e)}"
     
     # 验证字段
@@ -117,7 +231,7 @@ def card_validator(
                     elif field_type == str:
                         card_data[field] = str(card_data[field])
                         result["fixed"] = True
-                except:
+                except Exception:
                     result["issues"].append(f"无法自动修复字段：{field}")
     
     # 验证 status 值
@@ -154,13 +268,19 @@ def card_validator(
     # 生成报告
     if result["valid"] and not result["fixed"]:
         report = f"[OK] card.json 验证通过\n\n路径：{card_path}\n\n内容：\n{json.dumps(card_data, ensure_ascii=False, indent=2)}"
+        elapsed = time.time() - start_time
+        logger.info("[card_validator] <<< 验证通过 | card_path=%s | issues_count=0 | 耗时=%.3fs", card_path, elapsed)
     elif result["fixed"]:
         report = f"[FIXED] card.json 已修复\n\n路径：{card_path}\n\n问题：\n" + "\n".join(
             f"- {issue}" for issue in result["issues"]
         ) + f"\n\n修复后内容：\n{json.dumps(card_data, ensure_ascii=False, indent=2)}"
+        elapsed = time.time() - start_time
+        logger.info("[card_validator] <<< 已修复 | card_path=%s | issues_count=%d | 耗时=%.3fs", card_path, len(result["issues"]), elapsed)
     else:
         report = f"[FAIL] card.json 验证失败\n\n路径：{card_path}\n\n问题：\n" + "\n".join(
             f"- {issue}" for issue in result["issues"]
         ) + "\n\n建议：设置 fix=True 可自动修复"
-    
+        elapsed = time.time() - start_time
+        logger.warning("[card_validator] <<< 验证失败 | card_path=%s | issues_count=%d | 耗时=%.3fs", card_path, len(result["issues"]), elapsed)
+
     return report

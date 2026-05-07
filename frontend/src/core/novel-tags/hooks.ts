@@ -60,7 +60,7 @@ export function useThreadNovelToc(threadId: string, isNewThread: boolean) {
         variables: ThreadVariable[];
       };
       const novelToc = data.variables.find((v) => v.key === "novel_toc");
-      return novelToc?.value ?? null;
+      return novelToc?.value ?? undefined;
     },
     staleTime: 30 * 1000,
   });

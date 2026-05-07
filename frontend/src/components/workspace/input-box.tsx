@@ -337,6 +337,12 @@ export function InputBox({
       setFollowupsHidden(false);
       setFollowupsLoading(false);
 
+      const novelValue = String(lockedNovelValue ?? "").trim();
+      const modifiedMessage = { ...message };
+      if (novelValue) {
+        modifiedMessage.text = `当前小说是：${novelValue}\n\n${message.text}`;
+      }
+
       // Guard against submitting before the initial model auto-selection
       // effect has flushed thread settings to storage/state.
       if (resolvedModelName && context.model_name !== resolvedModelName) {
@@ -348,11 +354,11 @@ export function InputBox({
             selectedModel?.supports_thinking ?? false,
           ),
         });
-        setTimeout(() => onSubmit?.(message), 0);
+        setTimeout(() => onSubmit?.(modifiedMessage), 0);
         return;
       }
 
-      onSubmit?.(message);
+      onSubmit?.(modifiedMessage);
     },
     [
       context,
@@ -362,6 +368,7 @@ export function InputBox({
       resolvedModelName,
       selectedModel?.supports_thinking,
       status,
+      lockedNovelValue,
     ],
   );
 

@@ -69,6 +69,9 @@ def _sync_checkpointer_cm(config: CheckpointerConfig) -> Iterator[Checkpointer]:
         conn_str = resolve_sqlite_conn_str(config.connection_string or "store.db")
         ensure_sqlite_parent_dir(conn_str)
         with SqliteSaver.from_conn_string(conn_str) as saver:
+            # Enable WAL mode and busy_timeout for better concurrency
+            saver.conn.execute("PRAGMA journal_mode=WAL")
+            saver.conn.execute("PRAGMA busy_timeout=30000")
             saver.setup()
             logger.info("Checkpointer: using SqliteSaver (%s)", conn_str)
             yield saver

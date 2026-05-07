@@ -25,8 +25,9 @@ class TestGlobalVariablesStorageSQLite:
         reset_storage()
 
     def _create_storage(self) -> GlobalVariablesStorage:
-        storage = GlobalVariablesStorage()
-        storage._get_db_path = lambda: self.db_path
+        from deerflow.global_variables.db_sqlite import SQLiteGlobalVariablesDB
+        db = SQLiteGlobalVariablesDB(self.db_path)
+        storage = GlobalVariablesStorage(db)
         return storage
 
     def test_project_save_and_load(self):
