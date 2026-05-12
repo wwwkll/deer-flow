@@ -36,6 +36,8 @@ backend/packages/harness/deerflow/workflows/
 ├── executor.py           # 工作流执行引擎
 ├── helpers.py            # 辅助函数（调用子Agent）
 ├── novel_organize.py     # 整理工作流
+├── novel_plan.py         # 规划工作流
+├── novel_post_process.py # 后处理工作流
 └── novel_writing.py      # 写作工作流
 ```
 
@@ -139,6 +141,88 @@ check_task_summary → [通过] → write_chapter → audit → [AUDIT_RESULT: P
 - description: "写第6章"
 ```
 
+### 3.3 规划工作流 (plan)
+
+**流程**：
+```
+call_planner ──→ [outline-planner / volume-planner] ──→ scan_world_files ──→ update_world_files ──→ END
+             │                                            (并行/串行调用 world-updater)
+             │
+             └─→ [book-rules-manager] ──→ END (不更新世界观)
+             
+             └─→ [规划失败] ──→ END (返回错误)
+```
+
+**节点说明**：
+
+| 节点 | 功能 | 调用的子Agent |
+|------|------|---------------|
+| call_planner | 调用指定的规划Agent完成规划任务 | outline-planner / volume-planner / book-rules-manager |
+| scan_world_files | 扫描 `00-世界观/` 目录下所有 `.md` 文件 | 无（纯代码） |
+| update_world_files | 对每个世界观文件调用 `world-updater` 更新内容 | world-updater（并行或串行） |
+
+**路由判断机制**：
+
+`_should_update_world` 函数根据 planner_name 决定后续流程：
+- `outline-planner` / `volume-planner` → 进入 `scan_world_files` → 更新世界观
+- `book-rules-manager` → 直接 END（不触发世界观更新）
+- 规划失败（errors 中存在 failed）→ 直接 END（返回错误）
+
+**并行/串行执行**：
+
+由 `workflow_parallel_enabled` 配置控制：
+- `true`：并行调用多个 `world-updater`（适合线上模型）
+- `false`：串行逐个调用（适合本地模型）
+
+**调用示例**：
+```
+# 新建细纲（会触发世界观更新）
+调用 workflow 工具：
+- workflow_name: "plan"
+- params: {"planner_name": "outline-planner", "planner_mode": "new", "chapter_group": "第01-05章", "planner_task": "前5章的细纲"}
+- description: "新建第1-5章细纲"
+
+# 修改卷纲（会触发世界观更新）
+调用 workflow 工具：
+- workflow_name: "plan"
+- params: {"planner_name": "volume-planner", "planner_mode": "revise", "planner_task": "第二卷增加一个转折"}
+- description: "修改卷纲"
+
+# 修改规则（不会触发世界观更新）
+调用 workflow 工具：
+- workflow_name: "plan"
+- params: {"planner_name": "book-rules-manager", "planner_task": "增加禁用词列表"}
+- description: "修改本书规则"
+```
+
+**日志输出**：
+
+规划工作流使用 `[PLAN_WORKFLOW]` 前缀输出日志，关键节点都有 START/END 标记：
+```
+[PLAN_WORKFLOW] ====== call_planner START ======
+[PLAN_WORKFLOW] planner_name=outline-planner, planner_mode=new, novel_name=都市逍遥仙
+[PLAN_WORKFLOW] Calling subagent outline-planner (model=mimo-v2-omni)
+[PLAN_WORKFLOW] Subagent outline-planner completed successfully
+[PLAN_WORKFLOW] ====== call_planner END (success) ======
+[PLAN_WORKFLOW] _should_update_world: planner_name=outline-planner, errors_count=0
+[PLAN_WORKFLOW] Planner outline-planner requires world update, route to scan_world_files
+[PLAN_WORKFLOW] ====== scan_world_files START ======
+[PLAN_WORKFLOW] Found 6 world files to update:
+[PLAN_WORKFLOW]   [1] 故事圣经.md
+[PLAN_WORKFLOW]   [2] 角色矩阵.md
+[PLAN_WORKFLOW]   [3] 情感弧线.md
+[PLAN_WORKFLOW]   [4] 支线板.md
+[PLAN_WORKFLOW]   [5] 当前状态卡.md
+[PLAN_WORKFLOW]   [6] 待办事项.md
+[PLAN_WORKFLOW] ====== update_world_files START ======
+[PLAN_WORKFLOW] Total world files to update: 6
+[PLAN_WORKFLOW] Parallel execution enabled
+[PLAN_WORKFLOW] [1/6] SUCCESS 故事圣经.md
+[PLAN_WORKFLOW] [2/6] SUCCESS 角色矩阵.md
+...
+[PLAN_WORKFLOW] Parallel update complete: success=6/6, errors=0
+```
+
 ---
 
 ## 四、全局变量替换
@@ -223,7 +307,7 @@ from deerflow.workflows import my_workflow
 
 ```python
 from deerflow.workflows import list_workflows
-print(list_workflows())  # 应包含 'organize', 'writing'
+print(list_workflows())  # 应包含 'organize', 'plan', 'post_process', 'writing'
 ```
 
 ### 6.2 验证子 Agent 全局变量替换

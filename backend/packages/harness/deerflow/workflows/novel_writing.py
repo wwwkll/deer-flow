@@ -203,33 +203,9 @@ async def revise_chapter(state: NovelWorkflowState) -> dict[str, Any]:
         return {"errors": [f"Revise chapter failed: {e}"]}
 
 
-async def _post_process_summary(state: NovelWorkflowState) -> dict[str, Any]:
-    """Generate chapter summary."""
-    chapter_num = state.get("chapter_num", 0)
-    chapter_content = state.get("chapter_content", "")
-    chapter_group = state.get("chapter_group", "")
-    thread_id = state.get("thread_id")
-    model_name = state.get("model_name")
-
-    novel_base = get_novel_base(thread_id=thread_id)
-    if not novel_base:
-        return {"errors": ["无法获取小说根目录"]}
-    summary_path = f"{novel_base}/03-状态/章节摘要汇总.md"
-
-    summary_task = f"你的任务是生成第{chapter_num}章摘要。\n\n小说根目录：{novel_base}\n\n生成摘要后，追加写入：{summary_path}\n"
-
-    try:
-        summary_result = await call_subagent("chapter-summarizer", summary_task, parent_model=model_name)
-        return {"chapter_summary": summary_result}
-    except Exception as e:
-        logger.error(f"Chapter summarizer failed: {e}")
-        return {"errors": [f"Chapter summarizer failed: {e}"]}
-
-
 async def _post_process_state(state: NovelWorkflowState) -> dict[str, Any]:
-    """Update state card."""
+    """Update state card via world-updater."""
     chapter_num = state.get("chapter_num", 0)
-    chapter_content = state.get("chapter_content", "")
     chapter_group = state.get("chapter_group", "")
     thread_id = state.get("thread_id")
     model_name = state.get("model_name")
@@ -237,22 +213,28 @@ async def _post_process_state(state: NovelWorkflowState) -> dict[str, Any]:
     novel_base = get_novel_base(thread_id=thread_id)
     if not novel_base:
         return {"errors": ["无法获取小说根目录"]}
-    state_path = f"{novel_base}/03-状态/当前状态卡.md"
+    state_path = f"{novel_base}/00-世界观/当前状态卡.md"
 
-    state_task = f"你的任务是更新当前状态卡。\n\n小说根目录：{novel_base}\n\n更新状态文件：{state_path}\n"
+    state_task = (
+        f"你的任务是更新当前状态卡。\n\n"
+        f"当前阶段：writing（正文写作阶段）\n"
+        f"更新对象类型：正文写完后的世界观文本\n"
+        f"这意味着第{chapter_num}章正文已经写完，事件已实际发生，伏笔可以标记为正文已回收。\n\n"
+        f"小说根目录：{novel_base}\n\n"
+        f"更新状态文件：{state_path}\n"
+    )
 
     try:
-        await call_subagent("state-settler", state_task, parent_model=model_name)
+        await call_subagent("world-updater", state_task, parent_model=model_name)
         return {"state_updated": True}
     except Exception as e:
-        logger.error(f"State settler failed: {e}")
-        return {"errors": [f"State settler failed: {e}"]}
+        logger.error(f"State update failed: {e}")
+        return {"errors": [f"State update failed: {e}"]}
 
 
 async def _post_process_hooks(state: NovelWorkflowState) -> dict[str, Any]:
-    """Update hooks pool."""
+    """Update hooks pool via world-updater."""
     chapter_num = state.get("chapter_num", 0)
-    chapter_content = state.get("chapter_content", "")
     chapter_group = state.get("chapter_group", "")
     thread_id = state.get("thread_id")
     model_name = state.get("model_name")
@@ -260,52 +242,35 @@ async def _post_process_hooks(state: NovelWorkflowState) -> dict[str, Any]:
     novel_base = get_novel_base(thread_id=thread_id)
     if not novel_base:
         return {"errors": ["无法获取小说根目录"]}
-    hook_path = f"{novel_base}/03-状态/待办事项.md"
-    outline_path = f"{novel_base}/01-规划/chapters/{chapter_group}-细纲.md"
+    hook_path = f"{novel_base}/00-世界观/待办事项.md"
 
-    hook_task = f"你的任务是更新伏笔池。\n\n章节号：{chapter_num}\n更新伏笔池文件：{hook_path}\n"
+    hook_task = (
+        f"你的任务是更新伏笔池（待办事项.md）。\n\n"
+        f"当前阶段：writing（正文写作阶段）\n"
+        f"更新对象类型：正文写完后的世界观文本\n"
+        f"这意味着第{chapter_num}章正文已经写完，事件已实际发生，伏笔可以标记为正文已回收。\n\n"
+        f"章节号：{chapter_num}\n"
+        f"小说根目录：{novel_base}\n\n"
+        f"更新伏笔池文件：{hook_path}\n"
+    )
 
     try:
-        await call_subagent("hook-manager", hook_task, parent_model=model_name)
+        await call_subagent("world-updater", hook_task, parent_model=model_name)
         return {"hooks_updated": True}
     except Exception as e:
-        logger.error(f"Hook manager failed: {e}")
-        return {"errors": [f"Hook manager failed: {e}"]}
-
-
-async def _post_process_card(state: NovelWorkflowState) -> dict[str, Any]:
-    """Update novel card."""
-    chapter_num = state.get("chapter_num", 0)
-    chapter_content = state.get("chapter_content", "")
-
-    novel_base = get_novel_base(thread_id=state.get("thread_id"))
-    if not novel_base:
-        return {"errors": ["无法获取小说根目录"]}
-    card_path = f"{novel_base}/card.json"
-
-    result = update_novel_card(card_path, chapter_num, chapter_content)
-    if result["success"]:
-        return {"card_updated": True}
-    else:
-        logger.error(f"Card update failed: {result['error']}")
-        return {"errors": [f"Card update failed: {result['error']}"]}
+        logger.error(f"Hooks update failed: {e}")
+        return {"errors": [f"Hooks update failed: {e}"]}
 
 
 async def post_process_sequential(state: NovelWorkflowState) -> dict[str, Any]:
     """Sequential post-processing: run all sub-agents one by one."""
     results = {}
 
-    summary_result = await _post_process_summary(state)
-    results.update(summary_result)
-
     state_result = await _post_process_state(state)
     results.update(state_result)
 
     hooks_result = await _post_process_hooks(state)
     results.update(hooks_result)
-
-    card_result = await _post_process_card(state)
-    results.update(card_result)
 
     return results
 
@@ -315,10 +280,8 @@ async def post_process_parallel(state: NovelWorkflowState) -> dict[str, Any]:
     import asyncio
 
     results = await asyncio.gather(
-        _post_process_summary(state),
         _post_process_state(state),
         _post_process_hooks(state),
-        _post_process_card(state),
         return_exceptions=True,
     )
 
@@ -352,29 +315,6 @@ async def post_process(state: NovelWorkflowState) -> dict[str, Any]:
         return await post_process_sequential(state)
 
 
-async def sync_outline(state: NovelWorkflowState) -> dict[str, Any]:
-    novel_name = state.get("novel_name", "")
-    chapter_num = state.get("chapter_num", 0)
-    chapter_group = state.get("chapter_group", "")
-    thread_id = state.get("thread_id")
-    model_name = state.get("model_name")
-
-    logger.info(f"Writing workflow: syncing outline for chapter {chapter_num}")
-
-    novel_base = get_novel_base(thread_id=thread_id)
-    if not novel_base:
-        raise ValueError("无法获取小说根目录，请检查全局变量 novel_toc")
-
-    task = f"你的任务是同步细纲（sync模式）。\n\n章节号：{chapter_num}\n小说根目录：{novel_base}\n\n请根据正文内容，更新当前章节的完成状态。\n"
-
-    try:
-        await call_subagent("outline-planner", task, parent_model=model_name)
-        return {"outline_synced": True}
-    except Exception as e:
-        logger.error(f"Sync outline failed: {e}")
-        return {"errors": [f"Sync outline failed: {e}"]}
-
-
 def should_revise(state: NovelWorkflowState) -> str:
     if state.get("audit_passed"):
         return "post_process"
@@ -391,7 +331,6 @@ def create_writing_workflow() -> StateGraph:
     workflow.add_node("audit", audit_chapter)
     workflow.add_node("revise", revise_chapter)
     workflow.add_node("post_process", post_process)
-    workflow.add_node("sync_outline", sync_outline)
 
     workflow.set_entry_point("check_task_summary")
 
@@ -416,8 +355,7 @@ def create_writing_workflow() -> StateGraph:
     )
 
     workflow.add_edge("revise", "audit")
-    workflow.add_edge("post_process", "sync_outline")
-    workflow.add_edge("sync_outline", END)
+    workflow.add_edge("post_process", END)
 
     return workflow.compile()
 

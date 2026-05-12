@@ -33,6 +33,11 @@ class AgentConfig(BaseModel):
     description: str = ""
     model: str | None = None
     tool_groups: list[str] | None = None
+    # tools is a whitelist of specific tool names (e.g., ["read_file", "write_file"]).
+    # If set, it takes priority over tool_groups for filtering tools.
+    # - None (or omitted): use tool_groups for filtering (default behavior)
+    # - ["tool1", "tool2"]: only these tools are available
+    tools: list[str] | None = None
     # skills controls which skills are loaded into the agent's prompt:
     # - None (or omitted): load all enabled skills (default fallback behavior)
     # - [] (explicit empty list): disable all skills

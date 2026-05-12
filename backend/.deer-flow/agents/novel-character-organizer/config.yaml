@@ -3,8 +3,11 @@ description: |
   从角色矩阵.md 和当前状态卡.md 提取相关人物档案。
   当需要为写作准备人物参考时调用此Agent。
 tools:
-  - file:read
-  - file:write
+  - read_file
+  - glob
+  - grep
+  - write_file
+  - str_replace
 model: inherit
 max_turns: 60
 timeout_seconds: 600

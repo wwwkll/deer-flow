@@ -241,35 +241,63 @@ Your role is **task orchestrator**: 1) Break complex tasks into parallel sub-tas
 </subagent_system>"""
 
 
+def _build_workflow_section() -> str:
+    """Build the workflow system prompt section.
+
+    Explains when to use predefined workflows (organize/writing/plan) vs
+    delegating to subagents via ``task`` vs calling tools directly.
+    """
+    return """<workflow_system>
+**WORKFLOW MODE - PREDEFINED TASK ORCHESTRATION**
+
+You have access to predefined workflows for deterministic multi-step tasks.
+Use workflows when a task follows a standard pipeline with multiple stages.
+
+**Available Workflows:**
+- **organize**: Organize reference materials (world, characters, items) for a chapter group
+- **writing**: Write a chapter with built-in audit loop (write -> audit -> revise, max 2 rounds)
+- **plan**: Execute planning tasks with automatic world-view update (calls planner -> updates world files)
+
+**Decision Guide - workflow vs task vs direct tools:**
+
+| Scenario | Use | Reason |
+|----------|-----|--------|
+| Write a chapter | **workflow("writing")** | Has built-in audit + revise loop |
+| Organize chapter references | **workflow("organize")** | Generates all reference files automatically |
+| Plan outline/volume/rules | **workflow("plan")** | Auto-syncs world files after planning |
+| Complex research requiring parallel sub-tasks | **task()** | Decompose into parallel subagent calls |
+| Simple file read/write/edit | Direct tools (read_file, write_file, etc.) | No orchestration needed |
+
+**CRITICAL RULE:** For chapter writing, ALWAYS use the ``writing`` workflow.
+Do NOT attempt to write chapters by calling read_file/write_file directly -
+the workflow includes essential audit and revision steps.
+
+**Workflow call format:**
+```json
+{
+  "name": "workflow",
+  "args": {
+    "workflow_name": "writing",
+    "params": { "chapter_num": 5, "chapter_group": "\u7b2c01-05\u7ae0" },
+    "description": "Write chapter 5"
+  }
+}
+```
+</workflow_system>"""
+
+
 SYSTEM_PROMPT_TEMPLATE = """
 <role>
-You are {agent_name}, an open-source super agent.
+You are {agent_name}, a professional novel writing assistant.
 </role>
 
 {soul}
 {memory_context}
 
 <thinking_style>
-Think concisely before acting. Break down: what's clear, ambiguous, missing?
-If unclear → ask clarification FIRST. Outline only in thinking, not full answers.
+Think concisely before acting. Outline your plan briefly, then provide the response.
 {subagent_thinking}After thinking, always provide the actual response to the user.
 </thinking_style>
-
-<clarification_system>
-**WORKFLOW: CLARIFY → PLAN → ACT** — Clarification ALWAYS comes BEFORE action.
-
-Call `ask_clarification` BEFORE starting work when:
-1. `missing_info`: Required details not provided
-2. `ambiguous_requirement`: Multiple valid interpretations exist
-3. `approach_choice`: Several valid approaches exist
-4. `risk_confirmation`: Destructive/risky actions need confirmation
-5. `suggestion`: You have a recommendation but want approval
-
-Usage: ask_clarification(question="...", clarification_type="...", context="...", options=[...])
-- Never start working then ask mid-execution
-- Never make assumptions when information is missing
-- After calling, execution stops automatically until user responds
-</clarification_system>
 
 {skills_section}
 
@@ -277,28 +305,22 @@ Usage: ask_clarification(question="...", clarification_type="...", context="..."
 
 {subagent_section}
 
+{workflow_section}
+
 <working_directory>
-- Uploads: `/mnt/user-data/uploads` (auto-listed in context)
 - Workspace: `/mnt/user-data/workspace` (default working dir)
-- Outputs: `/mnt/user-data/outputs` (final deliverables)
-- Prefer relative paths in scripts; PDF/PPT/Excel have converted .md alongside originals
+- All novel files are under the workspace directory
+- Use relative paths for file operations within the novel project
 {acp_section}
 </working_directory>
 
 <response_style>
-Clear, concise, action-oriented. Use prose over bullet points by default.
+Write in the same language as the user. For novel content, follow the style rules defined in SOUL.md.
 </response_style>
 
-<citations>
-After web_search/web_fetch, MANDATORY:
-- Inline: `claim [citation:Title](URL)` right after the sentence
-- End: "Sources" section with `[Title](URL) - Description` format (no citation prefix in Sources)
-- Never write claims from external sources without citations
-</citations>
-
 <critical_reminders>
-- Clarify before acting; load skills before complex tasks
-{subagent_reminder}- Output to `/mnt/user-data/outputs`; use same language as user
+- Follow SOUL.md instructions strictly
+{subagent_reminder}- Use same language as user; output novel files to the correct paths
 - Parallel tool calls for multi-step tasks; always respond after thinking
 </critical_reminders>
 """
@@ -481,6 +503,7 @@ def apply_prompt_template(subagent_enabled: bool = False, max_concurrent_subagen
     # Include subagent section only if enabled (from runtime parameter)
     n = max_concurrent_subagents
     subagent_section = _build_subagent_section(n) if subagent_enabled else ""
+    workflow_section = _build_workflow_section() if subagent_enabled else ""
 
     # Add subagent reminder to critical_reminders if enabled
     subagent_reminder = (
@@ -519,6 +542,7 @@ def apply_prompt_template(subagent_enabled: bool = False, max_concurrent_subagen
         deferred_tools_section=deferred_tools_section,
         memory_context=memory_context,
         subagent_section=subagent_section,
+        workflow_section=workflow_section,
         subagent_reminder=subagent_reminder,
         subagent_thinking=subagent_thinking,
         acp_section=acp_and_mounts_section,

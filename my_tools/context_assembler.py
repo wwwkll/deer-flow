@@ -78,11 +78,11 @@ def context_assembler(
     logger.info("[context_assembler] 读取规则 | path=%s", rules_file)
     rules = read_file(rules_file)
 
-    state_file = f"{book_path}/03-状态/当前状态卡.md"
+    state_file = f"{book_path}/00-世界观/当前状态卡.md"
     logger.info("[context_assembler] 读取当前状态 | path=%s", state_file)
     current_state = read_file(state_file)
 
-    hooks_file = f"{book_path}/03-状态/待办事项.md"
+    hooks_file = f"{book_path}/00-世界观/待办事项.md"
     logger.info("[context_assembler] 读取伏笔 | path=%s", hooks_file)
     hooks = read_file(hooks_file)
 

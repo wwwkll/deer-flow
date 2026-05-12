@@ -29,4 +29,9 @@ class NovelWorkflowState(TypedDict, total=False):
     hooks_updated: bool
     card_updated: bool
     outline_synced: bool
+    planner_name: str
+    planner_mode: str
+    planner_task: str
+    world_files: list[str]
+    world_updated: bool
     errors: Annotated[list[str], operator.add]

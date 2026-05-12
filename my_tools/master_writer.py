@@ -1,5 +1,6 @@
 from langchain.tools import tool
 import os
+import time
 import logging
 from pathlib import Path
 
@@ -95,6 +96,7 @@ def master_writer(
         content: 写入内容（仅 write_file 时使用）
         new_path: 新路径（仅 move_file 和 rename_file 时使用，表示文件/文件夹的新位置或新名称）
     """
+    start_time = time.time()
     host_path = _resolve_path(file_path)
     logger.info("[master_writer] action=%s, input_path=%s, host_path=%s", action, file_path, host_path)
 

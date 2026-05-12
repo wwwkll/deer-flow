@@ -3,8 +3,10 @@ description: |
   连续性审计师，负责多维度审核小说章节一致性。
   检查角色、世界观、叙事连贯性、伏笔管理、写作质量等。
 model: inherit
-tool_groups:
-  - file:read
-  - file:write
+tools:
+  - read_file
+
+  - write_file
+  - str_replace
 subagent_enabled: false
 max_concurrent_subagents: 0

@@ -9,7 +9,6 @@ tools:
   - FileRead
   - FileEdit
   - FileWrite
-  - Glob
 ---
 
 # 小说架构师 Agent

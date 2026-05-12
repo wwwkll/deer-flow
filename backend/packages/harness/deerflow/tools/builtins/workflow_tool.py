@@ -48,7 +48,7 @@ def _auto_detect_chapter_group(novel_name: str, thread_id: str | None = None) ->
 
 
 def _auto_detect_params(workflow_name: str, params: dict[str, Any], thread_id: str | None = None) -> dict[str, Any]:
-    if workflow_name not in ("organize", "writing"):
+    if workflow_name not in ("organize", "writing", "plan"):
         return params
 
     params = params.copy()
@@ -79,11 +79,18 @@ async def workflow_tool(
     Available workflows:
     - organize: Organize reference materials (world, characters, items)
     - writing: Write chapter with audit loop (write → audit → revise)
+    - plan: Planning tasks with world-view auto-update (call planner → update world files)
 
     Required params for organize/writing:
     - novel_name: Novel name (optional, auto-detected if only one exists)
     - chapter_num: Chapter number (required, e.g., 5)
     - chapter_group: Chapter group range (optional, auto-detected if only one exists, e.g., "第05-10章")
+
+    Required params for plan:
+    - planner_name: Planner agent name (required, one of: outline-planner, volume-planner, book-rules-manager)
+    - planner_mode: Planner mode (optional, one of: new, revise, sync)
+    - planner_task: Task description for the planner (optional)
+    - chapter_group: Chapter group range (optional, for outline-planner, e.g., "第05-10章")
 
     Args:
         workflow_name: Name of the workflow to execute.

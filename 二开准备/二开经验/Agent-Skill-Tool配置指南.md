@@ -352,6 +352,56 @@ subagents:
 
 5. **重启服务**使配置生效
 
+### 3.6 world-updater Agent（规划工作流专用）
+
+**用途**：规划工作流（plan）内部调用，根据新写或新修改的细纲/卷纲，自动更新世界观文件。
+
+**目录结构**：
+```
+backend/.deer-flow/agents/world-updater/
+├── SOUL.md          # Agent 人格/指令提示词
+└── config.yaml      # Agent 运行配置
+```
+
+**config.yaml**：
+```yaml
+name: world-updater
+description: |
+  世界观更新员，负责根据新写或新修改的细纲/卷纲，更新指定的世界观文件，确保世界观与最新规划保持一致。
+model: inherit
+tool_groups:
+  - file:read
+  - file:write
+max_turns: 60
+timeout_seconds: 600
+```
+
+**特点**：
+- 由 `plan` 工作流自动调用，**不直接由主 Agent 调用**
+- 每次只更新一个世界观文件（并行/串行由工作流控制）
+- 入参：细纲/卷纲路径 + 目标世界观文件路径
+- 工具组：系统自带的 `file:read` + `file:write`
+
+**SOUL.md 核心要求**：
+1. 读取指定的细纲/卷纲文件，理解最新规划中的世界观变更
+2. 读取目标世界观文件，了解当前内容
+3. 只更新与规划变更相关的内容，保留其他已有内容不变
+4. 将更新后的完整文件内容写入目标文件路径
+5. 不得输出英文单双引号，必须使用中文 "" ''
+
+**注册方式**（无需在 `subagents.custom_agents` 中定义）：
+- 只需在 `backend/.deer-flow/agents/` 下创建 `world-updater/` 目录
+- 放入 `SOUL.md` 和 `config.yaml`
+- 服务启动时会自动扫描并注册
+- 如需覆盖超时配置，在 `config.yaml` 的 `subagents.agents` 中添加：
+  ```yaml
+  subagents:
+    agents:
+      world-updater:
+        timeout_seconds: 600
+        max_turns: 60
+  ```
+
 ---
 
 ## 四、配置 Skill（技能）

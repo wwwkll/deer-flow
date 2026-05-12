@@ -38,6 +38,7 @@ def get_available_tools(
     include_mcp: bool = True,
     model_name: str | None = None,
     subagent_enabled: bool = False,
+    tools: list[str] | None = None,
 ) -> list[BaseTool]:
     """Get all available tools from config.
 
@@ -49,12 +50,19 @@ def get_available_tools(
         include_mcp: Whether to include tools from MCP servers (default: True).
         model_name: Optional model name to determine if vision tools should be included.
         subagent_enabled: Whether to include subagent tools (task, task_status).
+        tools: Optional list of specific tool names to include (whitelist).
+            If set, takes priority over groups for filtering config tools.
 
     Returns:
         List of available tools.
     """
     config = get_app_config()
-    tool_configs = [tool for tool in config.tools if groups is None or tool.group in groups]
+    if tools is not None:
+        tool_configs = [tool for tool in config.tools if tool.name in tools]
+    elif groups is not None:
+        tool_configs = [tool for tool in config.tools if tool.group in groups]
+    else:
+        tool_configs = list(config.tools)
 
     # Do not expose host bash by default when LocalSandboxProvider is active.
     if not is_host_bash_allowed(config):

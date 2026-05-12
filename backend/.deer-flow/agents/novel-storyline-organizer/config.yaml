@@ -3,8 +3,11 @@ description: |
   从所有章节大纲中提取并缩写主要剧情，生成故事线参考。
   当需要为写作准备故事线参考时调用此Agent。
 tools:
-  - file:read
-  - file:write
+  - read_file
+  - glob
+  - grep
+  - write_file
+  - str_replace
 model: inherit
 max_turns: 60
 timeout_seconds: 1200

@@ -3,8 +3,11 @@ description: |
   从故事圣经.md 提取相关世界背景、力量体系等。
   当需要为写作准备世界观参考时调用此Agent。
 tools:
-  - file:read
-  - file:write
+  - read_file
+  - glob
+  - grep
+  - write_file
+  - str_replace
 model: inherit
 max_turns: 60
 timeout_seconds: 600

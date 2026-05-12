@@ -7,7 +7,7 @@ from typing import Any
 from langgraph.graph import END, StateGraph
 
 from deerflow.config.subagents_config import get_subagents_app_config
-from deerflow.workflows.helpers import call_subagent, get_novel_base, normalize_chapter_group, read_file_safe
+from deerflow.workflows.helpers import call_subagent, get_novel_base, normalize_chapter_group
 from deerflow.workflows.registry import register_workflow
 from deerflow.workflows.states import NovelWorkflowState
 from my_tools.path_resolver import set_current_thread_id
@@ -73,7 +73,7 @@ async def organize_world(state: NovelWorkflowState) -> dict[str, Any]:
     output_path = f"{novel_base}/02-正文/{chapter_group}/_task/世界观参考.md"
 
     card_path = f"{novel_base}/card.json"
-    state_path = f"{novel_base}/03-状态/当前状态卡.md"
+    state_path = f"{novel_base}/00-世界观/当前状态卡.md"
     outline_path = f"{novel_base}/01-规划/chapters/{chapter_group}-细纲.md"
     bible_path = f"{novel_base}/00-世界观/故事圣经.md"
 
@@ -120,7 +120,7 @@ async def organize_characters(state: NovelWorkflowState) -> dict[str, Any]:
     output_path = f"{novel_base}/02-正文/{chapter_group}/_task/人物参考.md"
 
     card_path = f"{novel_base}/card.json"
-    state_path = f"{novel_base}/03-状态/当前状态卡.md"
+    state_path = f"{novel_base}/00-世界观/当前状态卡.md"
     outline_path = f"{novel_base}/01-规划/chapters/{chapter_group}-细纲.md"
     matrix_path = f"{novel_base}/00-世界观/角色矩阵.md"
 
@@ -167,7 +167,7 @@ async def organize_items(state: NovelWorkflowState) -> dict[str, Any]:
     output_path = f"{novel_base}/02-正文/{chapter_group}/_task/道具参考.md"
 
     card_path = f"{novel_base}/card.json"
-    state_path = f"{novel_base}/03-状态/当前状态卡.md"
+    state_path = f"{novel_base}/00-世界观/当前状态卡.md"
     outline_path = f"{novel_base}/01-规划/chapters/{chapter_group}-细纲.md"
     bible_path = f"{novel_base}/00-世界观/故事圣经.md"
 
@@ -226,7 +226,7 @@ async def organize_storyline(state: NovelWorkflowState) -> dict[str, Any]:
     outlines_content = "\n".join(outline_sections) if outline_sections else "未找到细纲文件，请用read_file自行读取。"
 
     card_path = f"{novel_base}/card.json"
-    state_path = f"{novel_base}/03-状态/当前状态卡.md"
+    state_path = f"{novel_base}/00-世界观/当前状态卡.md"
 
     def _inject(label: str, path: str) -> str:
         # 提示词注入已禁用，让 Agent 自行读取文件

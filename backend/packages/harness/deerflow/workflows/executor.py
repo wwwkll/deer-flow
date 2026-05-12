@@ -42,6 +42,7 @@ class WorkflowResult:
 REQUIRED_PARAMS = {
     "organize": ["novel_name", "chapter_num", "chapter_group"],
     "writing": ["novel_name", "chapter_num", "chapter_group"],
+    "plan": ["planner_name"],
 }
 
 

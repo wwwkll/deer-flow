@@ -2,6 +2,7 @@ from langchain.tools import tool
 import json
 import os
 import re
+import time
 import logging
 from pathlib import Path
 from typing import Optional
@@ -122,6 +123,7 @@ def card_validator(
     Returns:
         验证结果报告（包含是否通过、问题列表、修复后的内容）
     """
+    start_time = time.time()
     card_path = resolve_to_host_path(card_path)
     card_path = card_path.replace("\\", "/")
     

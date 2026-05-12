@@ -11,7 +11,6 @@ tools:
   - FileEdit
   - FileWrite
   - Bash
-  - Glob
   - Agent
   - Skill
   - TodoWrite

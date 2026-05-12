@@ -3,8 +3,9 @@ description: |
   支持新建、修改、同步三种模式。
   当用户需要规划细纲或同步正文到细纲时调用此Agent。
 tools:
-  - file:read
-  - file:write
+  - read_file
+  - write_file
+  - str_replace
 model: inherit
 max_turns: 60
 timeout_seconds: 1200

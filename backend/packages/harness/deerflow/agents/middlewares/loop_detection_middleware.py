@@ -29,12 +29,12 @@ from langgraph.runtime import Runtime
 logger = logging.getLogger(__name__)
 
 # Defaults — can be overridden via constructor
-_DEFAULT_WARN_THRESHOLD = 3  # inject warning after 3 identical calls
-_DEFAULT_HARD_LIMIT = 5  # force-stop after 5 identical calls
+_DEFAULT_WARN_THRESHOLD = 6  # inject warning after 6 identical calls
+_DEFAULT_HARD_LIMIT = 10  # force-stop after 10 identical calls
 _DEFAULT_WINDOW_SIZE = 20  # track last N tool calls
 _DEFAULT_MAX_TRACKED_THREADS = 100  # LRU eviction limit
-_DEFAULT_TOOL_FREQ_WARN = 30  # warn after 30 calls to the same tool type
-_DEFAULT_TOOL_FREQ_HARD_LIMIT = 50  # force-stop after 50 calls to the same tool type
+_DEFAULT_TOOL_FREQ_WARN = 50  # warn after 50 calls to the same tool type
+_DEFAULT_TOOL_FREQ_HARD_LIMIT = 80  # force-stop after 80 calls to the same tool type
 
 
 def _normalize_tool_call_args(raw_args: object) -> tuple[dict, str | None]:
@@ -143,9 +143,9 @@ class LoopDetectionMiddleware(AgentMiddleware[AgentState]):
 
     Args:
         warn_threshold: Number of identical tool call sets before injecting
-            a warning message. Default: 3.
+            a warning message. Default: 6.
         hard_limit: Number of identical tool call sets before forcing
-            termination. Default: 5.
+            termination. Default: 10.
         window_size: Size of the sliding window for tracking calls.
             Default: 20.
         max_tracked_threads: Maximum number of threads to track before
@@ -153,9 +153,9 @@ class LoopDetectionMiddleware(AgentMiddleware[AgentState]):
         tool_freq_warn: Number of calls to the same tool *type* (regardless
             of arguments) before injecting a frequency warning. Catches
             cross-file read loops that hash-based detection misses.
-            Default: 30.
+            Default: 50.
         tool_freq_hard_limit: Number of calls to the same tool type before
-            forcing a stop. Default: 50.
+            forcing a stop. Default: 80.
     """
 
     def __init__(

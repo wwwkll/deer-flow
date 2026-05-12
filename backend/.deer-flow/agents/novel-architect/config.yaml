@@ -3,8 +3,10 @@ description: |
   包括世界观、卷纲、规则、计划、初始状态、伏笔池。
   当用户要创建新小说时调用此Agent。
 tools:
-  - file:read
-  - file:write
+  - read_file
+
+  - write_file
+  - str_replace
 model: inherit
 max_turns: 80
 timeout_seconds: 1800

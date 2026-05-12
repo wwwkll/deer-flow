@@ -1,3 +1,4 @@
+import functools
 import logging
 
 from langchain.agents import create_agent
@@ -51,7 +52,7 @@ def _resolve_model_name(requested_model_name: str | None = None) -> str:
     return default_model_name
 
 
-def _create_summarization_middleware() -> DeerFlowSummarizationMiddleware | None:
+def _create_summarization_middleware(agent_model_name: str | None = None) -> DeerFlowSummarizationMiddleware | None:
     """Create and configure the summarization middleware from config."""
     config = get_summarization_config()
 
@@ -78,7 +79,7 @@ def _create_summarization_middleware() -> DeerFlowSummarizationMiddleware | None
         model = create_chat_model(thinking_enabled=False)
 
     # Resolve context_window: config explicit > auto-detect from provider API
-    context_window = _resolve_context_window()
+    context_window = _resolve_context_window(agent_model_name)
 
     # Prepare kwargs
     kwargs = {
@@ -121,22 +122,30 @@ def _create_summarization_middleware() -> DeerFlowSummarizationMiddleware | None
     )
 
 
-def _resolve_context_window() -> int | None:
+def _resolve_context_window(model_name: str | None = None) -> int | None:
     """Resolve context_window from config or auto-detect from provider API.
 
     Priority:
-    1. Explicit context_window in model config
-    2. Auto-detect from {base_url}/models (LM Studio / Ollama compatible)
+    1. Look up the model matching *model_name* (fall back to models[0])
+    2. Use its explicit context_window if set
+    3. Auto-detect from {base_url}/models (LM Studio / Ollama compatible)
+    4. Default to 32768
     """
     app_config = get_app_config()
-    default_model = app_config.models[0] if app_config.models else None
-    if default_model is None:
+
+    # Try to find the target model by name; fall back to models[0]
+    target_model = None
+    if model_name:
+        target_model = app_config.get_model_config(model_name)
+    if target_model is None:
+        target_model = app_config.models[0] if app_config.models else None
+    if target_model is None:
         return None
 
-    if default_model.context_window is not None:
-        return default_model.context_window
+    if target_model.context_window is not None:
+        return target_model.context_window
 
-    base_url = getattr(default_model, "base_url", None)
+    base_url = getattr(target_model, "base_url", None)
     if base_url:
         detected = _auto_detect_context_window(base_url)
         if detected is not None:
@@ -145,8 +154,13 @@ def _resolve_context_window() -> int | None:
     return 32768
 
 
+@functools.lru_cache(maxsize=32)
 def _auto_detect_context_window(base_url: str) -> int | None:
-    """Query {base_url}/models to get context_length (works for LM Studio, Ollama, etc.)."""
+    """Query {base_url}/models to get context_length (works for LM Studio, Ollama, etc.).
+
+    Results (including failures) are cached per base_url for the lifetime of
+    the process so we never block the event loop more than once per endpoint.
+    """
     try:
         import urllib.request
         import json
@@ -154,7 +168,7 @@ def _auto_detect_context_window(base_url: str) -> int | None:
         url = f"{base_url.rstrip('/')}/models"
         req = urllib.request.Request(url, method="GET")
         req.add_header("Content-Type", "application/json")
-        with urllib.request.urlopen(req, timeout=5) as resp:
+        with urllib.request.urlopen(req, timeout=1) as resp:
             data = json.loads(resp.read().decode())
             models = data.get("data", [])
             if models and isinstance(models, list) and len(models) > 0:
@@ -163,7 +177,7 @@ def _auto_detect_context_window(base_url: str) -> int | None:
                     logger.info("Auto-detected context_window=%d from %s", ctx, url)
                     return ctx
     except Exception:
-        logger.debug("Could not auto-detect context_window from %s/models", base_url.rstrip("/"))
+        logger.info("Could not auto-detect context_window from %s/models (timeout=1s)", base_url.rstrip("/"))
     return None
 
 
@@ -306,7 +320,7 @@ def _build_middlewares(config: RunnableConfig, model_name: str | None, agent_nam
     middlewares = build_lead_runtime_middlewares(lazy_init=True)
 
     # Add summarization middleware if enabled
-    summarization_middleware = _create_summarization_middleware()
+    summarization_middleware = _create_summarization_middleware(agent_model_name=model_name)
     if summarization_middleware is not None:
         middlewares.append(summarization_middleware)
 
@@ -424,6 +438,7 @@ def make_lead_agent(config: RunnableConfig):
             "is_plan_mode": is_plan_mode,
             "subagent_enabled": subagent_enabled,
             "tool_groups": agent_config.tool_groups if agent_config else None,
+            "tools": agent_config.tools if agent_config else None,
             "available_skills": ["bootstrap"] if is_bootstrap else (agent_config.skills if agent_config and agent_config.skills is not None else None),
         }
     )
@@ -438,10 +453,14 @@ def make_lead_agent(config: RunnableConfig):
             state_schema=ThreadState,
         )
 
+    # Determine tool filtering: use agent_config.tools (whitelist) if set, otherwise fall back to tool_groups
+    agent_tools_list = agent_config.tools if agent_config else None
+    agent_tool_groups = agent_config.tool_groups if agent_config else None
+
     # Default lead agent (unchanged behavior)
     return create_agent(
         model=create_chat_model(name=model_name, thinking_enabled=thinking_enabled, reasoning_effort=reasoning_effort),
-        tools=get_available_tools(model_name=model_name, groups=agent_config.tool_groups if agent_config else None, subagent_enabled=subagent_enabled),
+        tools=get_available_tools(model_name=model_name, groups=agent_tool_groups, tools=agent_tools_list, subagent_enabled=subagent_enabled),
         middleware=_build_middlewares(config, model_name=model_name, agent_name=agent_name),
         system_prompt=apply_prompt_template(
             subagent_enabled=subagent_enabled, max_concurrent_subagents=max_concurrent_subagents, agent_name=agent_name, available_skills=set(agent_config.skills) if agent_config and agent_config.skills is not None else None

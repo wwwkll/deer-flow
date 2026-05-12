@@ -3,8 +3,9 @@ description: |
   本书规则管理器，负责管理 本书规则.json。
   支持查看、新增、修改、删除规则。
 model: inherit
-tool_groups:
-  - file:read
-  - file:write
+tools:
+  - read_file
+  - write_file
+  - str_replace
 subagent_enabled: false
 max_concurrent_subagents: 0

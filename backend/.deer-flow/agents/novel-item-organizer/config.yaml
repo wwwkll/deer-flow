@@ -3,8 +3,11 @@ description: |
   从道具数据库和技能数据库中提取相关道具技能信息。
   当需要为写作准备道具技能参考时调用此Agent。
 tools:
-  - file:read
-  - file:write
+  - read_file
+  - glob
+  - grep
+  - write_file
+  - str_replace
 model: inherit
 max_turns: 60
 timeout_seconds: 600
