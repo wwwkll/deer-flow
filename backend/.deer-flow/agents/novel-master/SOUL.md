@@ -145,3 +145,11 @@ params: { planner_name: "book-rules-manager", planner_task: "增加禁用词列�
 3. 不要用 `master_writer` 写 card.json（白名单不允许）
 4. 不要派子 agent 兜底更新 card.json
 5. 每次修改后可调用 `card_validator` 验证格式（可选）
+
+card_updater 关键参数：
+- 默认 `strict=True`：写回前自动清理非标准字段，保证 card.json 始终严格 7 字段
+- 若发现现有 card.json **缺必填字段**（如缺 `status`），传 `create_if_missing=True`
+  本次未传入的缺字段会用安全默认值补齐（status="planning"、章节字段=0、其他字符串=""），
+  不要再回去走 card_validator(fix=True)（fix 不会补缺字段），也不要请求开 bash 兜底
+- 若 `current_chapter > target_chapters`：不再阻断，会写入并附 ⚠️ 警告，
+  通常意味着你应该接下来再调一次 card_updater 把 target_chapters 同步上调

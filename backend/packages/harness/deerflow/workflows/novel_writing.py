@@ -247,8 +247,16 @@ async def revise_chapter(state: NovelWorkflowState) -> dict[str, Any]:
         return {"errors": [f"Revise chapter failed: {e}"]}
 
 
-async def _post_process_state(state: NovelWorkflowState) -> dict[str, Any]:
-    """Update state card via world-updater."""
+async def _post_process_combined(state: NovelWorkflowState) -> dict[str, Any]:
+    """Combined post-process: one world-updater call updates both
+    the state card and the hooks pool in a single turn.
+
+    历史上这里是两次并行调用 world-updater（一次写状态卡，一次写伏笔池），
+    但两次任务针对的是同一章正文，会重复读正文、重复初始化 Agent。
+    合并成一次后：省掉一份 LLM 初始化 + 一次正文读取，
+    并消除了"其中一个跑飞拖长整体时间"的尾延迟风险（日志里第 60 章那次
+    伏笔更新跑出 31 条消息、3.4 分钟）。
+    """
     chapter_num = state.get("chapter_num", 0)
     chapter_group = state.get("chapter_group", "")
     thread_id = state.get("thread_id")
@@ -257,112 +265,42 @@ async def _post_process_state(state: NovelWorkflowState) -> dict[str, Any]:
     novel_base = get_novel_base(thread_id=thread_id)
     if not novel_base:
         return {"errors": ["无法获取小说根目录"]}
+
     state_path = f"{novel_base}/00-世界观/当前状态卡.md"
-    chapter_group_normalized = normalize_chapter_group(chapter_group)
-    chapter_path = f"{novel_base}/02-正文/{chapter_group_normalized}/第{chapter_num}章.md"
-
-    state_task = (
-        f"你的任务是更新当前状态卡。\n\n"
-        f"当前阶段：writing（正文写作阶段）\n"
-        f"更新对象类型：正文写完后的世界观文本\n"
-        f"这意味着第{chapter_num}章正文已经写完，事件已实际发生，伏笔可以标记为正文已回收。\n\n"
-        f"小说根目录：{novel_base}\n\n"
-        f"正文文件路径（直接用read_file读取，不要搜索）：{chapter_path}\n"
-        f"更新状态文件：{state_path}\n"
-    )
-
-    try:
-        await call_subagent("world-updater", state_task, parent_model=model_name)
-        return {"state_updated": True}
-    except Exception as e:
-        logger.error(f"State update failed: {e}")
-        return {"errors": [f"State update failed: {e}"]}
-
-
-async def _post_process_hooks(state: NovelWorkflowState) -> dict[str, Any]:
-    """Update hooks pool via world-updater."""
-    chapter_num = state.get("chapter_num", 0)
-    chapter_group = state.get("chapter_group", "")
-    thread_id = state.get("thread_id")
-    model_name = state.get("model_name")
-
-    novel_base = get_novel_base(thread_id=thread_id)
-    if not novel_base:
-        return {"errors": ["无法获取小说根目录"]}
     hook_path = f"{novel_base}/00-世界观/待办事项.md"
     chapter_group_normalized = normalize_chapter_group(chapter_group)
     chapter_path = f"{novel_base}/02-正文/{chapter_group_normalized}/第{chapter_num}章.md"
 
-    hook_task = (
-        f"你的任务是更新伏笔池（待办事项.md）。\n\n"
+    combined_task = (
+        f"你的任务是根据第{chapter_num}章正文，一次性更新两个世界观文件。\n\n"
         f"当前阶段：writing（正文写作阶段）\n"
         f"更新对象类型：正文写完后的世界观文本\n"
         f"这意味着第{chapter_num}章正文已经写完，事件已实际发生，伏笔可以标记为正文已回收。\n\n"
         f"章节号：{chapter_num}\n"
         f"小说根目录：{novel_base}\n\n"
-        f"正文文件路径（直接用read_file读取，不要搜索）：{chapter_path}\n"
-        f"更新伏笔池文件：{hook_path}\n"
+        f"正文文件路径（只需用 read_file 读取一次，不要重复读取也不要搜索）：{chapter_path}\n\n"
+        f"读完正文后，依次完成以下两步更新（同一次任务内完成）：\n"
+        f"  1. 更新状态文件：{state_path}\n"
+        f"     —— 反映本章后主角位置、目标、敌人、关键状态变化。\n"
+        f"  2. 更新伏笔池文件：{hook_path}\n"
+        f"     —— 标记本章已回收的伏笔，登记本章新埋的伏笔。\n\n"
+        f"两次写入都用 str_replace 工具精确替换（先 read_file 再 str_replace），只有文件不存在时才用 write_file。\n"
     )
 
     try:
-        await call_subagent("world-updater", hook_task, parent_model=model_name)
-        return {"hooks_updated": True}
+        await call_subagent("world-updater", combined_task, parent_model=model_name)
+        return {"state_updated": True, "hooks_updated": True}
     except Exception as e:
-        logger.error(f"Hooks update failed: {e}")
-        return {"errors": [f"Hooks update failed: {e}"]}
-
-
-async def post_process_sequential(state: NovelWorkflowState) -> dict[str, Any]:
-    """Sequential post-processing: run all sub-agents one by one."""
-    results = {}
-
-    state_result = await _post_process_state(state)
-    results.update(state_result)
-
-    hooks_result = await _post_process_hooks(state)
-    results.update(hooks_result)
-
-    return results
-
-
-async def post_process_parallel(state: NovelWorkflowState) -> dict[str, Any]:
-    """Parallel post-processing: run all sub-agents concurrently."""
-    import asyncio
-
-    results = await asyncio.gather(
-        _post_process_state(state),
-        _post_process_hooks(state),
-        return_exceptions=True,
-    )
-
-    merged = {}
-    errors = []
-    for r in results:
-        if isinstance(r, Exception):
-            errors.append(str(r))
-        elif isinstance(r, dict):
-            merged.update(r)
-            if "errors" in r and r["errors"]:
-                errors.extend(r["errors"] if isinstance(r["errors"], list) else [r["errors"]])
-
-    if errors:
-        merged["errors"] = errors
-
-    return merged
+        logger.error(f"Post-process (combined) failed: {e}")
+        return {"errors": [f"Post-process failed: {e}"]}
 
 
 async def post_process(state: NovelWorkflowState) -> dict[str, Any]:
-    novel_name = state.get("novel_name", "")
     chapter_num = state.get("chapter_num", 0)
-
-    logger.info(f"Writing workflow: post-processing chapter {chapter_num}")
-
-    if _is_parallel_enabled():
-        logger.info("Post-process: using parallel execution")
-        return await post_process_parallel(state)
-    else:
-        logger.info("Post-process: using sequential execution")
-        return await post_process_sequential(state)
+    logger.info(f"Writing workflow: post-processing chapter {chapter_num} (combined world-updater call)")
+    # 并行/串行开关在 post_process 已无意义（只剩一个子调用），
+    # 仍保留 _is_parallel_enabled 以便其它 workflow 节点继续使用。
+    return await _post_process_combined(state)
 
 
 def should_revise(state: NovelWorkflowState) -> str:

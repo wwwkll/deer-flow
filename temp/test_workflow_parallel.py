@@ -57,19 +57,28 @@ def test_organize_workflow_creation():
 
 
 def test_post_process_functions():
-    """Test post process parallel/sequential functions exist."""
+    """Test post process parallel/sequential functions exist.
+
+    Note: novel_writing 的 post_process 已合并为单次 world-updater 调用，
+    不再有 parallel/sequential 双实现，所以只验证 novel_post_process 这边的。
+    novel_writing 改为统一通过 post_process 入口，内部直接调 _post_process_combined。
+    """
     from deerflow.workflows.novel_post_process import _process_single_chapter_parallel, _process_single_chapter_sequential
-    from deerflow.workflows.novel_writing import post_process_parallel, post_process_sequential
+    from deerflow.workflows.novel_writing import _post_process_combined, post_process
 
     assert callable(_process_single_chapter_parallel), "Post process parallel function not found"
     assert callable(_process_single_chapter_sequential), "Post process sequential function not found"
-    assert callable(post_process_parallel), "Writing post process parallel function not found"
-    assert callable(post_process_sequential), "Writing post process sequential function not found"
+    assert callable(post_process), "Writing post_process entry function not found"
+    assert callable(_post_process_combined), "Writing _post_process_combined function not found"
     print("[OK] All parallel/sequential functions exist")
 
 
 def test_is_parallel_enabled():
-    """Test _is_parallel_enabled function reads config correctly."""
+    """Test _is_parallel_enabled function reads config correctly.
+
+    Note: novel_writing 的 _is_parallel_enabled 仍保留（虽然 post_process 已合并不再使用，
+    但仍可能被其它 workflow 节点引用），所以继续验证。
+    """
     from deerflow.workflows.novel_organize import _is_parallel_enabled as organize_is_parallel
     from deerflow.workflows.novel_writing import _is_parallel_enabled as writing_is_parallel
     from deerflow.workflows.novel_post_process import _is_parallel_enabled as post_process_is_parallel

@@ -89,6 +89,7 @@ async def call_subagent(
     task: str,
     parent_model: str | None = None,
     thread_id: str | None = None,
+    checkpoint_enabled: bool = False,
 ) -> str:
     from deerflow.subagents import SubagentExecutor, get_subagent_config
     from deerflow.tools import get_available_tools
@@ -103,13 +104,27 @@ async def call_subagent(
     logger.info(f"[CALL_SUBAGENT_DEBUG] parent_model: {parent_model}")
     if parent_model is None:
         raise ValueError("parent_model is required but was not provided. Make sure model_name is passed from the workflow state.")
-    tools = get_available_tools(model_name=parent_model, subagent_enabled=False)
+    # Pre-filter tools by subagent's own config.tools / config.tool_groups whitelist.
+    # Priority inside get_available_tools: tools (whitelist) > groups > all.
+    # SubagentExecutor still applies _filter_tools(config.tools, config.disallowed_tools)
+    # internally; pre-filtering here avoids loading unnecessary tools (e.g. MCP).
+    tools = get_available_tools(
+        model_name=parent_model,
+        groups=config.tool_groups,
+        tools=config.tools,
+        subagent_enabled=False,
+    )
+    logger.info(
+        f"[CALL_SUBAGENT_DEBUG] subagent={subagent_name} "
+        f"tools={config.tools} tool_groups={config.tool_groups} -> {len(tools)} tool(s)"
+    )
 
     executor = SubagentExecutor(
         config=config,
         tools=tools,
         parent_model=parent_model,
         thread_id=thread_id,
+        checkpoint_enabled=checkpoint_enabled,
     )
 
     result = await executor._aexecute(task)

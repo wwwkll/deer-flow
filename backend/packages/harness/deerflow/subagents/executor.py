@@ -137,6 +137,7 @@ class SubagentExecutor:
         thread_data: ThreadDataState | None = None,
         thread_id: str | None = None,
         trace_id: str | None = None,
+        checkpoint_enabled: bool = True,
     ):
         """Initialize the executor.
 
@@ -148,12 +149,15 @@ class SubagentExecutor:
             thread_data: Thread data from parent agent.
             thread_id: Thread ID for sandbox operations.
             trace_id: Trace ID from parent for distributed tracing.
+            checkpoint_enabled: Whether to persist checkpoints. Set to False for
+                workflow-internal subagents to avoid checkpoint explosion.
         """
         self.config = config
         self.parent_model = parent_model
         self.sandbox_state = sandbox_state
         self.thread_data = thread_data
         self.thread_id = thread_id
+        self.checkpoint_enabled = checkpoint_enabled
         # Generate trace_id if not provided (for top-level calls)
         self.trace_id = trace_id or str(uuid.uuid4())[:8]
 
@@ -299,13 +303,16 @@ class SubagentExecutor:
             state = await self._build_initial_state(task)
 
             # Build config with thread_id for sandbox access and recursion limit
+            # Add a small buffer (10) over max_turns to account for system messages
+            # and initial state setup, but respect the configured limit.
             run_config: RunnableConfig = {
-                "recursion_limit": max(self.config.max_turns, 200),
+                "recursion_limit": self.config.max_turns + 10,
             }
             context = {}
             if self.thread_id:
-                run_config["configurable"] = {"thread_id": self.thread_id}
                 context["thread_id"] = self.thread_id
+                if self.checkpoint_enabled:
+                    run_config["configurable"] = {"thread_id": self.thread_id}
 
             logger.info(f"[trace={self.trace_id}] Subagent {self.config.name} starting async execution with max_turns={self.config.max_turns}")
 

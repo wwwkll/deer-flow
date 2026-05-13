@@ -2,12 +2,15 @@ name: novel-reviser
 description: |
   修稿编辑，负责根据审计报告修改小说正文。
   支持润色、改写、重写、反AI检测、定点修复等多种修稿模式。
-model: null
+model: inherit
 tools:
   - read_file
   - glob
   - grep
   - write_file
   - str_replace
+# 修稿 agent 不需要任何 skill（之前未设此字段时会把所有 enabled skills 都加载进来，
+# 包括完全无关的 vercel-deploy，浪费 prompt 上下文与磁盘 IO）
+skills: []
 subagent_enabled: false
 max_concurrent_subagents: 0

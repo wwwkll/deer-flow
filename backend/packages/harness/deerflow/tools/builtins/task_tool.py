@@ -133,12 +133,28 @@ async def task_tool(
     # Lazy import to avoid circular dependency
     from deerflow.tools import get_available_tools
 
-    # Inherit parent agent's tool restrictions - tools whitelist takes priority over tool_groups
+    # Resolve effective tool restrictions for the subagent.
+    # Priority: subagent's own config (tools > tool_groups) > parent agent's restrictions (tools > tool_groups).
+    # Rationale: a subagent's config is the authoritative declaration of what it needs;
+    # falling back to parent restrictions keeps prior behavior for subagents that don't declare any.
     parent_tool_groups = metadata.get("tool_groups")
     parent_tools = metadata.get("tools")
+    effective_tools = config.tools if config.tools is not None else parent_tools
+    effective_tool_groups = config.tool_groups if config.tool_groups is not None else parent_tool_groups
 
     # Subagents should not have subagent tools enabled (prevent recursive nesting)
-    tools = get_available_tools(model_name=parent_model, groups=parent_tool_groups, tools=parent_tools, subagent_enabled=False)
+    tools = get_available_tools(
+        model_name=parent_model,
+        groups=effective_tool_groups,
+        tools=effective_tools,
+        subagent_enabled=False,
+    )
+    logger.info(
+        f"[trace={trace_id}] task_tool resolving subagent={subagent_type}: "
+        f"own_tools={config.tools} own_tool_groups={config.tool_groups} | "
+        f"parent_tools={parent_tools} parent_tool_groups={parent_tool_groups} | "
+        f"effective_tools={effective_tools} effective_tool_groups={effective_tool_groups} -> {len(tools)} tool(s)"
+    )
 
     # Create executor
     executor = SubagentExecutor(

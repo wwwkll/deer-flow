@@ -42,7 +42,11 @@ class CustomSubagentConfig(BaseModel):
     )
     tools: list[str] | None = Field(
         default=None,
-        description="Tool names whitelist (None = inherit all tools from parent)",
+        description="Tool names whitelist (None = fall back to tool_groups; takes priority over tool_groups)",
+    )
+    tool_groups: list[str] | None = Field(
+        default=None,
+        description="Tool group names whitelist, e.g. ['file:read', 'file:write']. Used only when `tools` is None.",
     )
     disallowed_tools: list[str] | None = Field(
         default_factory=lambda: ["task", "ask_clarification", "present_files"],

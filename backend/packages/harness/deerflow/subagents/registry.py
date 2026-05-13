@@ -15,6 +15,7 @@ logger = logging.getLogger(__name__)
 _SUBAGENT_CONFIG_FIELDS = {
     "description",
     "tools",
+    "tool_groups",
     "disallowed_tools",
     "skills",
     "model",
@@ -44,6 +45,7 @@ def _build_custom_subagent_config(name: str) -> SubagentConfig | None:
         description=custom.description,
         system_prompt=custom.system_prompt,
         tools=custom.tools,
+        tool_groups=custom.tool_groups,
         disallowed_tools=custom.disallowed_tools,
         skills=custom.skills,
         model=custom.model,
