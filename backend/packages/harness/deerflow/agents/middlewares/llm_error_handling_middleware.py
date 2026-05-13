@@ -92,6 +92,11 @@ class LLMErrorHandlingMiddleware(AgentMiddleware[AgentState]):
         self._circuit_state = "closed"
         self._circuit_probe_in_flight = False
 
+        # 并发控制：后台子Agent和主Agent可能同时发起LLM调用，
+        # 本地模型服务（如LM Studio）单线程处理会拒绝并发连接。
+        # 用信号量限制同一时刻最多1个LLM请求。
+        self._llm_semaphore = threading.BoundedSemaphore(1)
+
     def _check_circuit(self) -> bool:
         """Returns True if circuit is OPEN (fast fail), False otherwise."""
         with self._circuit_lock:
@@ -223,42 +228,48 @@ class LLMErrorHandlingMiddleware(AgentMiddleware[AgentState]):
         if self._check_circuit():
             return AIMessage(content=self._build_circuit_breaker_message())
 
-        attempt = 1
-        while True:
-            try:
-                response = handler(request)
-                self._record_success()
-                return response
-            except GraphBubbleUp:
-                # Preserve LangGraph control-flow signals (interrupt/pause/resume).
-                with self._circuit_lock:
-                    if self._circuit_state == "half_open":
-                        self._circuit_probe_in_flight = False
-                raise
-            except Exception as exc:
-                retriable, reason = self._classify_error(exc)
-                if retriable and attempt < self.retry_max_attempts:
-                    wait_ms = self._build_retry_delay_ms(attempt, exc)
+        if not self._llm_semaphore.acquire(timeout=300):
+            logger.error("LLM semaphore acquire timed out after 300s - possible deadlock")
+            return AIMessage(content="The LLM service is currently busy. Please try again later.")
+
+        try:
+            attempt = 1
+            while True:
+                try:
+                    response = handler(request)
+                    self._record_success()
+                    return response
+                except GraphBubbleUp:
+                    with self._circuit_lock:
+                        if self._circuit_state == "half_open":
+                            self._circuit_probe_in_flight = False
+                    raise
+                except Exception as exc:
+                    retriable, reason = self._classify_error(exc)
+                    if retriable and attempt < self.retry_max_attempts:
+                        wait_ms = self._build_retry_delay_ms(attempt, exc)
+                        logger.warning(
+                            "Transient LLM error on attempt %d/%d; retrying in %dms: %s",
+                            attempt,
+                            self.retry_max_attempts,
+                            wait_ms,
+                            _extract_error_detail(exc),
+                        )
+                        self._emit_retry_event(attempt, wait_ms, reason)
+                        time.sleep(wait_ms / 1000)
+                        attempt += 1
+                        continue
                     logger.warning(
-                        "Transient LLM error on attempt %d/%d; retrying in %dms: %s",
+                        "LLM call failed after %d attempt(s): %s",
                         attempt,
-                        self.retry_max_attempts,
-                        wait_ms,
                         _extract_error_detail(exc),
+                        exc_info=exc,
                     )
-                    self._emit_retry_event(attempt, wait_ms, reason)
-                    time.sleep(wait_ms / 1000)
-                    attempt += 1
-                    continue
-                logger.warning(
-                    "LLM call failed after %d attempt(s): %s",
-                    attempt,
-                    _extract_error_detail(exc),
-                    exc_info=exc,
-                )
-                if retriable:
-                    self._record_failure()
-                return AIMessage(content=self._build_user_message(exc, reason))
+                    if retriable:
+                        self._record_failure()
+                    return AIMessage(content=self._build_user_message(exc, reason))
+        finally:
+            self._llm_semaphore.release()
 
     @override
     async def awrap_model_call(
@@ -269,42 +280,54 @@ class LLMErrorHandlingMiddleware(AgentMiddleware[AgentState]):
         if self._check_circuit():
             return AIMessage(content=self._build_circuit_breaker_message())
 
-        attempt = 1
-        while True:
-            try:
-                response = await handler(request)
-                self._record_success()
-                return response
-            except GraphBubbleUp:
-                # Preserve LangGraph control-flow signals (interrupt/pause/resume).
-                with self._circuit_lock:
-                    if self._circuit_state == "half_open":
-                        self._circuit_probe_in_flight = False
-                raise
-            except Exception as exc:
-                retriable, reason = self._classify_error(exc)
-                if retriable and attempt < self.retry_max_attempts:
-                    wait_ms = self._build_retry_delay_ms(attempt, exc)
+        loop = asyncio.get_running_loop()
+        try:
+            await asyncio.wait_for(
+                loop.run_in_executor(None, self._llm_semaphore.acquire),
+                timeout=300,
+            )
+        except asyncio.TimeoutError:
+            logger.error("LLM semaphore acquire timed out after 300s - possible deadlock")
+            return AIMessage(content="The LLM service is currently busy. Please try again later.")
+
+        try:
+            attempt = 1
+            while True:
+                try:
+                    response = await handler(request)
+                    self._record_success()
+                    return response
+                except GraphBubbleUp:
+                    with self._circuit_lock:
+                        if self._circuit_state == "half_open":
+                            self._circuit_probe_in_flight = False
+                    raise
+                except Exception as exc:
+                    retriable, reason = self._classify_error(exc)
+                    if retriable and attempt < self.retry_max_attempts:
+                        wait_ms = self._build_retry_delay_ms(attempt, exc)
+                        logger.warning(
+                            "Transient LLM error on attempt %d/%d; retrying in %dms: %s",
+                            attempt,
+                            self.retry_max_attempts,
+                            wait_ms,
+                            _extract_error_detail(exc),
+                        )
+                        self._emit_retry_event(attempt, wait_ms, reason)
+                        await asyncio.sleep(wait_ms / 1000)
+                        attempt += 1
+                        continue
                     logger.warning(
-                        "Transient LLM error on attempt %d/%d; retrying in %dms: %s",
+                        "LLM call failed after %d attempt(s): %s",
                         attempt,
-                        self.retry_max_attempts,
-                        wait_ms,
                         _extract_error_detail(exc),
+                        exc_info=exc,
                     )
-                    self._emit_retry_event(attempt, wait_ms, reason)
-                    await asyncio.sleep(wait_ms / 1000)
-                    attempt += 1
-                    continue
-                logger.warning(
-                    "LLM call failed after %d attempt(s): %s",
-                    attempt,
-                    _extract_error_detail(exc),
-                    exc_info=exc,
-                )
-                if retriable:
-                    self._record_failure()
-                return AIMessage(content=self._build_user_message(exc, reason))
+                    if retriable:
+                        self._record_failure()
+                    return AIMessage(content=self._build_user_message(exc, reason))
+        finally:
+            self._llm_semaphore.release()
 
 
 def _matches_any(detail: str, patterns: tuple[str, ...]) -> bool:

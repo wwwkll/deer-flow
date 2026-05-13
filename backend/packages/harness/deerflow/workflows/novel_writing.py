@@ -3,6 +3,7 @@
 import logging
 import os
 import re
+from pathlib import Path
 from typing import Any
 
 from langgraph.graph import END, StateGraph
@@ -126,11 +127,54 @@ async def write_chapter(state: NovelWorkflowState) -> dict[str, Any]:
     task = f"你的任务是撰写第{chapter_num}章正文。\n\n小说根目录：{novel_base}\n\n将正文写入：{output_path}\n"
 
     try:
-        result = await call_subagent("novel-writer", task, parent_model=model_name)
+        result_text = await call_subagent("novel-writer", task, parent_model=model_name)
+
+        # 兜底：检查子Agent是否成功将正文写入文件
+        output_path_obj = Path(output_path)
+        if not output_path_obj.exists() or output_path_obj.stat().st_size < 500:
+            logger.warning(
+                f"Chapter file not written by sub-agent ({output_path}), "
+                f"extracting from response ({len(result_text)} chars)"
+            )
+            chapter_content = _extract_chapter_text(result_text, chapter_num)
+            output_path_obj.parent.mkdir(parents=True, exist_ok=True)
+            output_path_obj.write_text(chapter_content, encoding="utf-8")
+            logger.info(
+                f"Chapter written from response fallback: {output_path} "
+                f"({len(chapter_content)} chars)"
+            )
+
         return {"chapter_content": output_path, "chapter_group": chapter_group_normalized}
     except Exception as e:
         logger.error(f"Write chapter failed: {e}")
         return {"errors": [f"Write chapter failed: {e}"]}
+
+
+# 正文可能以"好的，我需要撰写第X章..."之类的规划文字开头的行首关键词
+_PLANNING_PREFIX_PATTERNS = re.compile(
+    r"^(好的[，,。]?|现在[，,]?\s*我需要|根据[，,]|首先[，,]|接下来[，,]|我需要|"
+    r"本章[的]?|以下是|正文如下|第\d+章[\.。、，,])"
+)
+
+
+def _extract_chapter_text(raw_text: str, chapter_num: int) -> str:
+    lines = raw_text.strip().split("\n")
+    start_idx = 0
+
+    for i, line in enumerate(lines):
+        stripped = line.strip()
+        if not stripped:
+            continue
+        if not _PLANNING_PREFIX_PATTERNS.match(stripped):
+            start_idx = i
+            break
+
+    content_lines = lines[start_idx:]
+    content = "\n".join(content_lines).strip()
+    if len(content) < 100 and start_idx > 0:
+        content = "\n".join(lines).strip()
+
+    return content
 
 
 def _parse_audit_result(text: str) -> bool:
@@ -214,6 +258,8 @@ async def _post_process_state(state: NovelWorkflowState) -> dict[str, Any]:
     if not novel_base:
         return {"errors": ["无法获取小说根目录"]}
     state_path = f"{novel_base}/00-世界观/当前状态卡.md"
+    chapter_group_normalized = normalize_chapter_group(chapter_group)
+    chapter_path = f"{novel_base}/02-正文/{chapter_group_normalized}/第{chapter_num}章.md"
 
     state_task = (
         f"你的任务是更新当前状态卡。\n\n"
@@ -221,6 +267,7 @@ async def _post_process_state(state: NovelWorkflowState) -> dict[str, Any]:
         f"更新对象类型：正文写完后的世界观文本\n"
         f"这意味着第{chapter_num}章正文已经写完，事件已实际发生，伏笔可以标记为正文已回收。\n\n"
         f"小说根目录：{novel_base}\n\n"
+        f"正文文件路径（直接用read_file读取，不要搜索）：{chapter_path}\n"
         f"更新状态文件：{state_path}\n"
     )
 
@@ -243,6 +290,8 @@ async def _post_process_hooks(state: NovelWorkflowState) -> dict[str, Any]:
     if not novel_base:
         return {"errors": ["无法获取小说根目录"]}
     hook_path = f"{novel_base}/00-世界观/待办事项.md"
+    chapter_group_normalized = normalize_chapter_group(chapter_group)
+    chapter_path = f"{novel_base}/02-正文/{chapter_group_normalized}/第{chapter_num}章.md"
 
     hook_task = (
         f"你的任务是更新伏笔池（待办事项.md）。\n\n"
@@ -251,6 +300,7 @@ async def _post_process_hooks(state: NovelWorkflowState) -> dict[str, Any]:
         f"这意味着第{chapter_num}章正文已经写完，事件已实际发生，伏笔可以标记为正文已回收。\n\n"
         f"章节号：{chapter_num}\n"
         f"小说根目录：{novel_base}\n\n"
+        f"正文文件路径（直接用read_file读取，不要搜索）：{chapter_path}\n"
         f"更新伏笔池文件：{hook_path}\n"
     )
 

@@ -150,6 +150,7 @@ async function onRunStopped(rt: ThreadRuntime, threadId: string) {
   try {
     card = await getNovelCard(threadId, rt.novelToc);
   } catch {
+    toast.warning("监控：读取 card.json 失败，将在下次停止时重试");
     return;
   }
 
@@ -162,10 +163,26 @@ async function onRunStopped(rt: ThreadRuntime, threadId: string) {
   }
 
   // 3. Should we resume? Check if last 5 chapters before target are present
-  if (hasRequiredChapters(detected, card.target_chapters)) return;
+  if (hasRequiredChapters(detected, card.target_chapters)) {
+    toast.info(
+      `监控：已检测到目标章节（第${card.target_chapters}章附近），无需续传`,
+    );
+    return;
+  }
 
-  // 4. Wait for idle timeout, then re-read and send
+  // 4. Notify user that we detected a stop and will wait
   const timeoutMs = rt.config.idleTimeoutMinutes * 60 * 1000;
+  const missing: number[] = [];
+  const requiredCount = Math.min(5, card.target_chapters);
+  const start = Math.max(1, card.target_chapters - requiredCount + 1);
+  for (let ch = start; ch <= card.target_chapters; ch++) {
+    if (!detected.includes(ch)) missing.push(ch);
+  }
+  toast.info(
+    `监控：任务已停止，缺少章节 ${missing.length > 0 ? missing.map((c) => `第${c}章`).join(", ") : "（未识别）"}，` +
+      `${rt.config.idleTimeoutMinutes} 分钟后自动续传`,
+    { duration: 15000 },
+  );
 
   rt.idleTimerId = setTimeout(async () => {
     if (!rt.enabled) return;
@@ -176,6 +193,7 @@ async function onRunStopped(rt: ThreadRuntime, threadId: string) {
     try {
       latestCard = await getNovelCard(threadId, rt.novelToc);
     } catch {
+      toast.warning("监控：续传前读取 card.json 失败，跳过本次续传");
       return;
     }
 
@@ -188,15 +206,22 @@ async function onRunStopped(rt: ThreadRuntime, threadId: string) {
     }
 
     // Check again if resume is still needed
-    if (hasRequiredChapters(latestDetected, latestCard.target_chapters)) return;
+    if (hasRequiredChapters(latestDetected, latestCard.target_chapters)) {
+      toast.info("监控：续传前检查发现章节已齐全，取消续传");
+      return;
+    }
 
     const prompt = buildResumePrompt(
       latestDetected,
       latestCard.target_chapters,
     );
     try {
+      toast.success("监控：正在发送续传消息...");
       await rt.doSendMessage(prompt);
-    } catch {
+    } catch (err) {
+      toast.error(
+        `监控：续传消息发送失败 - ${err instanceof Error ? err.message : "未知错误"}`,
+      );
       rt.stopTimes.push(Date.now());
       maybeHandleErrorPattern(rt, threadId);
     }
@@ -302,6 +327,9 @@ export function useAutoResumeMonitor(
     };
   }, [threadId]);
 
+  // Event-driven: detect isLoading true→false transition
+  const prevLoadingRef = useRef(false);
+
   // Restore monitor state from persisted global variable on mount
   const restoredRef = useRef(false);
   useEffect(() => {
@@ -326,12 +354,48 @@ export function useAutoResumeMonitor(
             enabled: true,
             cardPath,
           }));
+
+          // Sync prevLoadingRef with current state so next transition is detected
+          const currentLoading = getIsLoadingRef.current();
+          prevLoadingRef.current = currentLoading;
+
+          // If task is already idle when monitor is restored, trigger a check
+          if (!currentLoading) {
+            setTimeout(() => {
+              if (rt.enabled && !rt.getIsLoading()) {
+                void onRunStopped(rt, threadId);
+              }
+            }, 2000);
+          }
         }
       })
       .catch(() => {
         // Silently ignore - monitor was not previously enabled
       });
   }, [threadId, novelToc]);
+
+  // Visibility change: when user switches back to this tab, check if resume needed
+  useEffect(() => {
+    if (!threadId) return;
+
+    const handleVisibilityChange = () => {
+      if (document.hidden) return;
+      const rt = getRuntime(threadId);
+      if (!rt.enabled) return;
+      if (rt.getIsLoading()) return;
+
+      // Sync prevLoadingRef with current state
+      prevLoadingRef.current = false;
+
+      // Task is idle and monitor is active - check if we need to resume
+      void onRunStopped(rt, threadId);
+    };
+
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+    return () => {
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
+    };
+  }, [threadId]);
 
   // Sync React state → runtime
   useEffect(() => {
@@ -380,7 +444,6 @@ export function useAutoResumeMonitor(
   }, [threadId, novelToc, monitorState.enabled]);
 
   // Event-driven: detect isLoading true→false transition
-  const prevLoadingRef = useRef(false);
   useEffect(() => {
     if (!threadId) return;
     const rt = getRuntime(threadId);

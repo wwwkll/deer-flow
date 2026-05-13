@@ -57,9 +57,11 @@ def post_write_validator(file_path: str) -> str:
         issues.append("错误：正文包含状态更新标记")
         logger.warning("[post_write_validator] 检测到状态更新标记")
 
-    if '"' in content or "'" in content:
-        issues.append('错误：正文包含英文引号，应使用中文引号\u201c\u201d')
-        logger.warning("[post_write_validator] 检测到英文引号")
+    # 英文引号检测：仅记录日志，不作为阻断项（LLM 生成正文难免混入直引号，
+    # 过度修正会导致无限循环。如需统一引号格式，可手动或使用编辑器批量替换。）
+    quote_count = content.count('"') + content.count("'")
+    if quote_count > 0:
+        logger.info("[post_write_validator] 检测到%d个英文引号（仅提示，非阻断）", quote_count)
 
     chinese_chars = len(re.findall(r"[\u4e00-\u9fff]", content))
     logger.debug("[post_write_validator] 中文字数统计 | chinese_chars=%d", chinese_chars)

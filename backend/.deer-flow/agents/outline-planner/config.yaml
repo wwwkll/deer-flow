@@ -4,6 +4,8 @@ description: |
   当用户需要规划细纲或同步正文到细纲时调用此Agent。
 tools:
   - read_file
+  - glob
+  - grep
   - write_file
   - str_replace
 model: inherit
