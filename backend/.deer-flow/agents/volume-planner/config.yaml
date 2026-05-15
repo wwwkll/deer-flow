@@ -3,6 +3,8 @@ description: |
   当用户需要规划或修改卷纲时调用此Agent。
 tools:
   - read_file
+  - glob
+  - grep
   - write_file
   - str_replace
 model: inherit

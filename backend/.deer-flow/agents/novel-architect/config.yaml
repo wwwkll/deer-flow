@@ -4,7 +4,8 @@ description: |
   当用户要创建新小说时调用此Agent。
 tools:
   - read_file
-
+  - glob
+  - grep
   - write_file
   - str_replace
 model: inherit

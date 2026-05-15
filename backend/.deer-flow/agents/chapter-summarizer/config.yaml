@@ -3,8 +3,11 @@ description: |
   生成100字以内的摘要，追加到 章节摘要汇总.md。
   当章节完成后需要生成摘要时调用此Agent。
 tools:
-  - file:read
-  - file:write
+  - read_file
+  - glob
+  - grep
+  - write_file
+  - str_replace
 model: inherit
 max_turns: 60
 timeout_seconds: 600

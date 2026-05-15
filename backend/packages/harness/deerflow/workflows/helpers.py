@@ -3,10 +3,21 @@
 import json
 import logging
 import os
+import re
 from datetime import datetime, timezone
 from pathlib import Path
 
 logger = logging.getLogger(__name__)
+
+_AUDIT_RESULT_PATTERN = re.compile(r"\[AUDIT_RESULT:\s*(PASS|FAIL)\]", re.IGNORECASE)
+
+
+def parse_audit_result(text: str) -> bool:
+    match = _AUDIT_RESULT_PATTERN.search(text)
+    if match:
+        return match.group(1).upper() == "PASS"
+    logger.warning("Audit result marker not found, defaulting to FAIL")
+    return False
 
 
 def get_workdir(thread_id: str | None = None) -> str:
@@ -89,7 +100,6 @@ async def call_subagent(
     task: str,
     parent_model: str | None = None,
     thread_id: str | None = None,
-    checkpoint_enabled: bool = False,
 ) -> str:
     from deerflow.subagents import SubagentExecutor, get_subagent_config
     from deerflow.tools import get_available_tools
@@ -124,7 +134,6 @@ async def call_subagent(
         tools=tools,
         parent_model=parent_model,
         thread_id=thread_id,
-        checkpoint_enabled=checkpoint_enabled,
     )
 
     result = await executor._aexecute(task)

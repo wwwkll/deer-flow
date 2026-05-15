@@ -5,7 +5,8 @@ description: |
 model: inherit
 tools:
   - read_file
-
+  - glob
+  - grep
   - write_file
   - str_replace
 subagent_enabled: false

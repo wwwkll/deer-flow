@@ -341,10 +341,22 @@ subagents:
     bash:
       timeout_seconds: 300
       max_turns: 80
-    # 世界观更新员（规划工作流调用，根据细纲/卷纲更新世界观文件）
+    # 世界观更新员（写作工作流调用，根据正文更新世界观文件）
     world-updater:
       timeout_seconds: 600
       max_turns: 60
+    # 细纲审核师（规划工作流调用，审核细纲质量）
+    outline-auditor:
+      timeout_seconds: 600
+      max_turns: 40
+    # 细纲修改师（规划工作流调用，根据审核报告修改细纲）
+    outline-reviser:
+      timeout_seconds: 600
+      max_turns: 40
+    # 细纲摘要维护师（规划工作流调用，更新细纲摘要文档）
+    outline-summarizer:
+      timeout_seconds: 300
+      max_turns: 30
 
 checkpointer:
   type: sqlite

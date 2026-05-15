@@ -9,14 +9,12 @@ from typing import Any
 from langgraph.graph import END, StateGraph
 
 from deerflow.config.subagents_config import get_subagents_app_config
-from deerflow.workflows.helpers import call_subagent, get_novel_base, normalize_chapter_group, read_file_safe, update_novel_card
+from deerflow.workflows.helpers import call_subagent, get_novel_base, normalize_chapter_group, parse_audit_result, read_file_safe, update_novel_card
 from deerflow.workflows.registry import register_workflow
 from deerflow.workflows.states import NovelWorkflowState
 from my_tools.path_resolver import set_current_thread_id
 
 logger = logging.getLogger(__name__)
-
-_AUDIT_RESULT_PATTERN = re.compile(r"\[AUDIT_RESULT:\s*(PASS|FAIL)\]", re.IGNORECASE)
 
 
 def _is_parallel_enabled() -> bool:
@@ -107,6 +105,7 @@ async def write_chapter(state: NovelWorkflowState) -> dict[str, Any]:
     chapter_group = state.get("chapter_group", "")
     thread_id = state.get("thread_id")
     model_name = state.get("model_name")
+    user_request = state.get("user_request", "")
 
     if not novel_name:
         raise ValueError("缺少必需参数: novel_name")
@@ -125,6 +124,9 @@ async def write_chapter(state: NovelWorkflowState) -> dict[str, Any]:
     output_path = f"{novel_base}/02-正文/{chapter_group_normalized}/第{chapter_num}章.md"
 
     task = f"你的任务是撰写第{chapter_num}章正文。\n\n小说根目录：{novel_base}\n\n将正文写入：{output_path}\n"
+
+    if user_request and user_request.strip():
+        task += f"\n【用户特殊要求】\n{user_request.strip()}\n请务必在写作中落实以上用户要求。\n"
 
     try:
         result_text = await call_subagent("novel-writer", task, parent_model=model_name)
@@ -178,11 +180,7 @@ def _extract_chapter_text(raw_text: str, chapter_num: int) -> str:
 
 
 def _parse_audit_result(text: str) -> bool:
-    match = _AUDIT_RESULT_PATTERN.search(text)
-    if match:
-        return match.group(1).upper() == "PASS"
-    logger.warning("Audit result marker not found, defaulting to FAIL")
-    return False
+    return parse_audit_result(text)
 
 
 async def audit_chapter(state: NovelWorkflowState) -> dict[str, Any]:
@@ -192,6 +190,7 @@ async def audit_chapter(state: NovelWorkflowState) -> dict[str, Any]:
     chapter_group = state.get("chapter_group", "")
     thread_id = state.get("thread_id")
     model_name = state.get("model_name")
+    user_request = state.get("user_request", "")
 
     logger.info(f"Writing workflow: auditing chapter {chapter_num}")
 
@@ -201,6 +200,9 @@ async def audit_chapter(state: NovelWorkflowState) -> dict[str, Any]:
     audit_report_path = f"{novel_base}/04-审稿/第{chapter_num}章-审计报告.md"
 
     task = f"你的任务是审核第{chapter_num}章。\n\n小说根目录：{novel_base}\n\n审核完成后，将审计报告写入：{audit_report_path}\n\n重要：在报告末尾，必须单独一行输出审核结论标记：\n- 如果审核通过，请输出：[AUDIT_RESULT: PASS]\n- 如果审核不通过，请输出：[AUDIT_RESULT: FAIL]\n"
+
+    if user_request and user_request.strip():
+        task += f'\n【用户特殊要求符合性审核】\n用户在写作前提出了以下特殊要求：\n{user_request.strip()}\n\n请在审核时额外检查：正文内容是否符合上述用户特殊要求。如不符合，在审计报告中明确列出"未满足的用户要求"。\n'
 
     try:
         result = await call_subagent("continuity-auditor", task, parent_model=model_name)
@@ -228,6 +230,7 @@ async def revise_chapter(state: NovelWorkflowState) -> dict[str, Any]:
     audit_report = state.get("audit_report", "")
     thread_id = state.get("thread_id")
     model_name = state.get("model_name")
+    user_request = state.get("user_request", "")
 
     logger.info(f"Writing workflow: revising chapter {chapter_num}")
 
@@ -238,6 +241,9 @@ async def revise_chapter(state: NovelWorkflowState) -> dict[str, Any]:
     modify_record_path = f"{novel_base}/04-审稿/第{chapter_num}章-修改记录.md"
 
     task = f"你的任务是根据审计报告修改第{chapter_num}章正文。\n\n小说根目录：{novel_base}\n\n根据审计报告中的问题逐项修改正文，修改后：\n- 覆盖写入：{output_path}\n- 将修改记录写入：{modify_record_path}\n"
+
+    if user_request and user_request.strip():
+        task += f"\n【用户特殊要求】\n{user_request.strip()}\n修改时请同时确保正文符合以上用户要求。\n"
 
     try:
         result = await call_subagent("novel-reviser", task, parent_model=model_name)
@@ -266,7 +272,7 @@ async def _post_process_combined(state: NovelWorkflowState) -> dict[str, Any]:
     if not novel_base:
         return {"errors": ["无法获取小说根目录"]}
 
-    state_path = f"{novel_base}/00-世界观/当前状态卡.md"
+    state_path = f"{novel_base}/03-状态/当前状态.md"
     hook_path = f"{novel_base}/00-世界观/待办事项.md"
     chapter_group_normalized = normalize_chapter_group(chapter_group)
     chapter_path = f"{novel_base}/02-正文/{chapter_group_normalized}/第{chapter_num}章.md"

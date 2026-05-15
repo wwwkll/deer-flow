@@ -137,7 +137,7 @@ check_task_summary → [通过] → write_chapter → audit → [AUDIT_RESULT: P
 ```
 调用 workflow 工具：
 - workflow_name: "writing"
-- params: {"novel_name": "都市逍遥仙", "chapter_num": 6, "chapter_group": "06-10", "writing_task_summary": "book/都市逍遥仙/02-正文/第06-10章/_task/写作任务汇总.md"}
+- params: {"novel_name": "都市逍遥仙", "chapter_num": 6, "chapter_group": "06-10", "writing_task_summary": "book/都市逍遥仙/02-正文/第6-10章/_task/写作任务汇总.md"}
 - description: "写第6章"
 ```
 
@@ -179,7 +179,7 @@ call_planner ──→ [outline-planner / volume-planner] ──→ scan_world_f
 # 新建细纲（会触发世界观更新）
 调用 workflow 工具：
 - workflow_name: "plan"
-- params: {"planner_name": "outline-planner", "planner_mode": "new", "chapter_group": "第01-05章", "planner_task": "前5章的细纲"}
+- params: {"planner_name": "outline-planner", "planner_mode": "new", "chapter_group": "第1-5章", "planner_task": "前5章的细纲"}
 - description: "新建第1-5章细纲"
 
 # 修改卷纲（会触发世界观更新）

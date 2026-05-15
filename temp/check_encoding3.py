@@ -65,8 +65,8 @@ test_cases = [
     (r"C:\xiangmu\deer-flow\backend\.deer-flow\shared-data\book\女帅回归：从赐死到女帝", "/mnt/shared-data/book/女帅回归：从赐死到女帝"),
     (r"C:\xiangmu\deer-flow\backend\.deer-flow\shared-data\book\女帅回归：从赐死到女帝\01-规划", "/mnt/shared-data/book/女帅回归：从赐死到女帝/01-规划"),
     (r"C:\xiangmu\deer-flow\backend\.deer-flow\shared-data\book\女帅回归：从赐死到女帝\01-规划\chapters", "/mnt/shared-data/book/女帅回归：从赐死到女帝/01-规划/chapters"),
-    (r"C:\xiangmu\deer-flow\backend\.deer-flow\shared-data\book\女帅回归：从赐死到女帝\02-正文\第01-05章", "/mnt/shared-data/book/女帅回归：从赐死到女帝/02-正文/第01-05章"),
-    (r"C:\xiangmu\deer-flow\backend\.deer-flow\shared-data\book\女帅回归：从赐死到女帝\02-正文\第01-05章\_task", "/mnt/shared-data/book/女帅回归：从赐死到女帝/02-正文/第01-05章/_task"),
+    (r"C:\xiangmu\deer-flow\backend\.deer-flow\shared-data\book\女帅回归：从赐死到女帝\02-正文\第1-5章", "/mnt/shared-data/book/女帅回归：从赐死到女帝/02-正文/第1-5章"),
+    (r"C:\xiangmu\deer-flow\backend\.deer-flow\shared-data\book\女帅回归：从赐死到女帝\02-正文\第1-5章\_task", "/mnt/shared-data/book/女帅回归：从赐死到女帝/02-正文/第1-5章/_task"),
 ]
 
 for actual, virtual in test_cases:

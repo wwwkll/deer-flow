@@ -34,4 +34,9 @@ class NovelWorkflowState(TypedDict, total=False):
     planner_task: str
     world_files: list[str]
     world_updated: bool
+    outline_audit_passed: bool
+    outline_audit_round: int
+    outline_audit_report: str
+    outline_summary_updated: bool
+    user_request: str
     errors: Annotated[list[str], operator.add]

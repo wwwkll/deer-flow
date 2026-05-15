@@ -19,7 +19,7 @@ def context_assembler(
 
     Args:
         book_name: 小说名称
-        chapter_group: 章节组范围，如"第01-05章"
+        chapter_group: 章节组范围，如"第1-5章"
         target_chapter: 当前要写的章节号
         task_dir: 任务目录路径（可选，默认使用标准路径）
 
@@ -78,7 +78,7 @@ def context_assembler(
     logger.info("[context_assembler] 读取规则 | path=%s", rules_file)
     rules = read_file(rules_file)
 
-    state_file = f"{book_path}/00-世界观/当前状态卡.md"
+    state_file = f"{book_path}/03-状态/当前状态卡.md"
     logger.info("[context_assembler] 读取当前状态 | path=%s", state_file)
     current_state = read_file(state_file)
 
