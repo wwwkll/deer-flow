@@ -1,33 +1,16 @@
-"""Novel plan workflow - Planning tasks with world-view auto-update."""
+"""Novel plan workflow - Planning tasks with outline audit loop and summary update."""
 
-import asyncio
 import logging
-from pathlib import Path
 from typing import Any
 
 from langgraph.graph import END, StateGraph
-
-from deerflow.config.subagents_config import get_subagents_app_config
-from deerflow.workflows.helpers import call_subagent, get_novel_base
-from deerflow.workflows.registry import register_workflow
-from deerflow.workflows.states import NovelWorkflowState
 from my_tools.path_resolver import set_current_thread_id
 
+from deerflow.workflows.helpers import call_subagent, get_novel_base, parse_audit_result
+from deerflow.workflows.registry import register_workflow
+from deerflow.workflows.states import NovelWorkflowState
+
 logger = logging.getLogger(__name__)
-
-_INJECTION_NOTE = "【重要提示】以下是需要参考的文件路径，请使用 read_file 工具自行读取：\n\n"
-
-
-def _is_parallel_enabled() -> bool:
-    try:
-        config = get_subagents_app_config()
-        return config.workflow_parallel_enabled
-    except Exception:
-        return True
-
-
-def _inject(label: str, path: str) -> str:
-    return f"## {label}\n路径：{path}\n[请用read_file自行读取]\n"
 
 
 async def call_planner(state: NovelWorkflowState) -> dict[str, Any]:
@@ -41,7 +24,7 @@ async def call_planner(state: NovelWorkflowState) -> dict[str, Any]:
     novel_name = state.get("novel_name", "")
     user_request = state.get("user_request", "")
 
-    logger.info(f"[PLAN_WORKFLOW] ====== call_planner START ======")
+    logger.info("[PLAN_WORKFLOW] ====== call_planner START ======")
     logger.info(f"[PLAN_WORKFLOW] planner_name={planner_name}, planner_mode={planner_mode}, novel_name={novel_name}")
     logger.info(f"[PLAN_WORKFLOW] chapter_group={state.get('chapter_group', '')}, model_name={model_name}")
 
@@ -79,281 +62,222 @@ async def call_planner(state: NovelWorkflowState) -> dict[str, Any]:
 
     try:
         logger.info(f"[PLAN_WORKFLOW] Calling subagent {planner_name} (model={model_name})")
-        result = await call_subagent(planner_name, task, parent_model=model_name)
+        await call_subagent(planner_name, task, parent_model=model_name)
         logger.info(f"[PLAN_WORKFLOW] Subagent {planner_name} completed successfully")
-        logger.info(f"[PLAN_WORKFLOW] ====== call_planner END (success) ======")
+        logger.info("[PLAN_WORKFLOW] ====== call_planner END (success) ======")
         return {}
     except Exception as e:
         logger.error(f"[PLAN_WORKFLOW] Subagent {planner_name} failed: {e}")
-        logger.info(f"[PLAN_WORKFLOW] ====== call_planner END (failed) ======")
+        logger.info("[PLAN_WORKFLOW] ====== call_planner END (failed) ======")
         return {"errors": [f"{planner_name} failed: {e}"]}
 
 
-def _should_update_world(state: NovelWorkflowState) -> str:
+def _route_after_planner(state: NovelWorkflowState) -> str:
     errors = state.get("errors", [])
     planner_name = state.get("planner_name", "")
 
-    logger.info(f"[PLAN_WORKFLOW] _should_update_world: planner_name={planner_name}, errors_count={len(errors)}")
+    logger.info(f"[PLAN_WORKFLOW] _route_after_planner: planner_name={planner_name}, errors_count={len(errors)}")
 
     if errors:
         has_planner_error = any("failed" in str(e).lower() for e in errors)
         if has_planner_error:
-            logger.warning(f"[PLAN_WORKFLOW] Planner failed, skipping world update. errors={errors}")
+            logger.warning(f"[PLAN_WORKFLOW] Planner failed, ending workflow. errors={errors}")
             return "end_with_error"
 
-    if planner_name in ("outline-planner", "volume-planner"):
-        logger.info(f"[PLAN_WORKFLOW] Planner {planner_name} requires world update, route to scan_world_files")
-        return "scan_world_files"
+    if planner_name == "book-rules-manager":
+        logger.info("[PLAN_WORKFLOW] book-rules-manager does not need audit or summary update, route to end")
+        return "end_no_update"
 
-    logger.info(f"[PLAN_WORKFLOW] Planner {planner_name} does not require world update, route to end")
+    if planner_name == "outline-planner":
+        logger.info("[PLAN_WORKFLOW] outline-planner requires audit, route to audit_outline")
+        return "audit_outline"
+
+    if planner_name == "volume-planner":
+        logger.info("[PLAN_WORKFLOW] volume-planner does not need audit, route to update_outline_summary")
+        return "update_outline_summary"
+
+    logger.info(f"[PLAN_WORKFLOW] Unknown planner_name={planner_name}, route to end")
     return "end_no_update"
 
 
-async def scan_world_files(state: NovelWorkflowState) -> dict[str, Any]:
-    thread_id = state.get("thread_id")
-    novel_name = state.get("novel_name", "")
+async def audit_outline(state: NovelWorkflowState) -> dict[str, Any]:
+    set_current_thread_id(state.get("thread_id"))
 
-    logger.info(f"[PLAN_WORKFLOW] ====== scan_world_files START ======")
-    logger.info(f"[PLAN_WORKFLOW] novel_name={novel_name}")
-
-    novel_base = get_novel_base(thread_id=thread_id)
-    if not novel_base:
-        logger.error("[PLAN_WORKFLOW] Failed to get novel_base in scan_world_files")
-        raise ValueError("无法获取小说根目录，请检查全局变量 novel_toc")
-
-    world_dir = Path(f"{novel_base}/00-世界观")
-    logger.info(f"[PLAN_WORKFLOW] Scanning world_dir={world_dir}")
-
-    if not world_dir.exists():
-        logger.warning(f"[PLAN_WORKFLOW] World directory does not exist: {world_dir}")
-        logger.info(f"[PLAN_WORKFLOW] ====== scan_world_files END (no dir) ======")
-        return {"world_files": []}
-
-    world_files = []
-    for f in sorted(world_dir.iterdir()):
-        if f.is_file() and f.suffix == ".md":
-            world_files.append(str(f))
-
-    logger.info(f"[PLAN_WORKFLOW] Found {len(world_files)} world files to update:")
-    for idx, wf in enumerate(world_files, 1):
-        logger.info(f"[PLAN_WORKFLOW]   [{idx}] {Path(wf).name}")
-
-    logger.info(f"[PLAN_WORKFLOW] ====== scan_world_files END (found {len(world_files)} files) ======")
-    return {"world_files": world_files}
-
-
-async def _update_single_world_file(
-    world_file_path: str,
-    novel_base: str,
-    planner_name: str,
-    planner_mode: str,
-    chapter_group: str,
-    model_name: str | None,
-) -> dict[str, Any]:
-    file_name = Path(world_file_path).name
-    logger.info(f"[PLAN_WORKFLOW] ------ updating world file: {file_name} ------")
-
-    outline_path = ""
-    if planner_name == "outline-planner" and chapter_group:
-        outline_path = f"{novel_base}/01-规划/chapters/{chapter_group}-细纲.md"
-    elif planner_name == "volume-planner":
-        outline_path = f"{novel_base}/01-规划/卷纲.md"
-
-    card_path = f"{novel_base}/card.json"
-
-    logger.info(f"[PLAN_WORKFLOW]   outline_path={outline_path}")
-    logger.info(f"[PLAN_WORKFLOW]   card_path={card_path}")
-    logger.info(f"[PLAN_WORKFLOW]   target_file={world_file_path}")
-
-    sections = ""
-    if outline_path:
-        sections += _inject("规划文件（细纲/卷纲）", outline_path)
-    sections += _inject("小说名片", card_path)
-    sections += _inject("目标世界观文件", world_file_path)
-
-    related_files = []
-    world_dir = Path(f"{novel_base}/00-世界观")
-    if world_dir.exists():
-        for f in sorted(world_dir.iterdir()):
-            if f.is_file() and f.suffix == ".md" and str(f) != world_file_path:
-                related_files.append(str(f))
-
-    if related_files:
-        sections += "## 其他世界观文件（按需读取）\n"
-        for rf in related_files:
-            rf_name = Path(rf).name
-            sections += f"- {rf_name}：路径：{rf}\n"
-
-    mode_desc = ""
-    if planner_name == "outline-planner":
-        if planner_mode == "new":
-            mode_desc = "新建了细纲"
-        elif planner_mode == "revise":
-            mode_desc = "修改了细纲"
-        elif planner_mode == "sync":
-            mode_desc = "同步了细纲"
-        else:
-            mode_desc = "更新了细纲"
-    elif planner_name == "volume-planner":
-        if planner_mode == "new":
-            mode_desc = "新建了卷纲"
-        elif planner_mode == "revise":
-            mode_desc = "修改了卷纲"
-        else:
-            mode_desc = "更新了卷纲"
-
-    task = f"""你的任务是根据{mode_desc}的内容，评估并更新指定的世界观文件。
-
-当前阶段：outline（细纲规划阶段）
-这意味着只是完成了规划，正文尚未写作。更新世界观文件时，事件/伏笔等只能标记为"细纲已规划"或"待正文回收"，不能标记为已完成/已回收。
-
-更新对象类型：细纲对应的世界观文本
-规划Agent：{planner_name}（{planner_mode}模式）
-目标文件：{world_file_path}
-
-{_INJECTION_NOTE}{sections}
-
-【重要】你有权决定是否需要更新此文件：
-1. 先读取规划文件和目标世界观文件
-2. 判断规划中的变更是否与当前目标文件相关
-3. 如果完全不相关或无需补充 → 无需任何操作，直接结束
-4. 如果有需要更新的内容 → 根据规划中的变更更新目标文件
-   - 只更新与规划变更相关的内容
-   - 保留其他已有内容不变
-   - 使用 str_replace 精确替换需要变更的部分（详见 world-updater 的输出策略）
-
-注意：跳过不需要更新的文件是正常且鼓励的行为，不要强行修改无关文件。
-"""
-
-    try:
-        logger.info(f"[PLAN_WORKFLOW]   Calling world-updater for {file_name} (model={model_name})")
-        result = await call_subagent("world-updater", task, parent_model=model_name)
-        logger.info(f"[PLAN_WORKFLOW]   world-updater completed for {file_name}")
-        return {"file": world_file_path, "success": True}
-    except Exception as e:
-        logger.error(f"[PLAN_WORKFLOW]   world-updater failed for {file_name}: {e}")
-        return {"file": world_file_path, "success": False, "errors": [f"Update {file_name} failed: {e}"]}
-
-
-async def update_world_files_sequential(state: NovelWorkflowState) -> dict[str, Any]:
-    world_files = state.get("world_files", [])
-    thread_id = state.get("thread_id")
-    model_name = state.get("model_name")
-    planner_name = state.get("planner_name", "")
-    planner_mode = state.get("planner_mode", "")
     chapter_group = state.get("chapter_group", "")
-    novel_name = state.get("novel_name", "")
-
-    logger.info(f"[PLAN_WORKFLOW] ====== update_world_files_sequential START ======")
-    logger.info(f"[PLAN_WORKFLOW] novel_name={novel_name}, total_files={len(world_files)}, mode=sequential")
-
-    novel_base = get_novel_base(thread_id=thread_id)
-    if not novel_base:
-        logger.error("[PLAN_WORKFLOW] Failed to get novel_base in update_world_files_sequential")
-        raise ValueError("无法获取小说根目录，请检查全局变量 novel_toc")
-
-    if not world_files:
-        logger.info("[PLAN_WORKFLOW] No world files to update, skipping")
-        logger.info(f"[PLAN_WORKFLOW] ====== update_world_files_sequential END (no files) ======")
-        return {"world_updated": True}
-
-    errors = []
-    success_count = 0
-    for idx, wf in enumerate(world_files, 1):
-        logger.info(f"[PLAN_WORKFLOW] [{idx}/{len(world_files)}] Processing {Path(wf).name}")
-        result = await _update_single_world_file(
-            world_file_path=wf,
-            novel_base=novel_base,
-            planner_name=planner_name,
-            planner_mode=planner_mode,
-            chapter_group=chapter_group,
-            model_name=model_name,
-        )
-        if result.get("success", False):
-            success_count += 1
-            logger.info(f"[PLAN_WORKFLOW] [{idx}/{len(world_files)}] SUCCESS {Path(wf).name}")
-        else:
-            errors.extend(result.get("errors", []))
-            logger.error(f"[PLAN_WORKFLOW] [{idx}/{len(world_files)}] FAILED {Path(wf).name}")
-
-    logger.info(f"[PLAN_WORKFLOW] Sequential update complete: success={success_count}/{len(world_files)}, errors={len(errors)}")
-    logger.info(f"[PLAN_WORKFLOW] ====== update_world_files_sequential END ======")
-    return {"world_updated": True, "errors": errors if errors else None}
-
-
-async def update_world_files_parallel(state: NovelWorkflowState) -> dict[str, Any]:
-    world_files = state.get("world_files", [])
-    thread_id = state.get("thread_id")
     model_name = state.get("model_name")
-    planner_name = state.get("planner_name", "")
-    planner_mode = state.get("planner_mode", "")
-    chapter_group = state.get("chapter_group", "")
-    novel_name = state.get("novel_name", "")
+    thread_id = state.get("thread_id")
+    user_request = state.get("user_request", "")
+    outline_audit_round = state.get("outline_audit_round", 0)
 
-    logger.info(f"[PLAN_WORKFLOW] ====== update_world_files_parallel START ======")
-    logger.info(f"[PLAN_WORKFLOW] novel_name={novel_name}, total_files={len(world_files)}, mode=parallel")
+    logger.info(f"[PLAN_WORKFLOW] ====== audit_outline START (round={outline_audit_round}) ======")
+    logger.info(f"[PLAN_WORKFLOW] chapter_group={chapter_group}, model_name={model_name}")
 
     novel_base = get_novel_base(thread_id=thread_id)
     if not novel_base:
-        logger.error("[PLAN_WORKFLOW] Failed to get novel_base in update_world_files_parallel")
+        logger.error("[PLAN_WORKFLOW] Failed to get novel_base in audit_outline")
         raise ValueError("无法获取小说根目录，请检查全局变量 novel_toc")
 
-    if not world_files:
-        logger.info("[PLAN_WORKFLOW] No world files to update, skipping")
-        logger.info(f"[PLAN_WORKFLOW] ====== update_world_files_parallel END (no files) ======")
-        return {"world_updated": True}
+    outline_path = f"{novel_base}/01-规划/chapters/{chapter_group}-细纲.md"
+    audit_report_path = f"{novel_base}/04-审稿/{chapter_group}-审核报告.md"
 
-    logger.info(f"[PLAN_WORKFLOW] Launching {len(world_files)} parallel world-updater tasks")
-    tasks = [
-        _update_single_world_file(
-            world_file_path=wf,
-            novel_base=novel_base,
-            planner_name=planner_name,
-            planner_mode=planner_mode,
-            chapter_group=chapter_group,
-            model_name=model_name,
-        )
-        for wf in world_files
+    logger.info(f"[PLAN_WORKFLOW] outline_path={outline_path}")
+    logger.info(f"[PLAN_WORKFLOW] audit_report_path={audit_report_path}")
+
+    task_parts = [
+        f"请对细纲进行第 {outline_audit_round + 1} 轮审核。",
+        f"章节范围：{chapter_group}",
+        f"小说根目录：{novel_base}",
+        f"待审核细纲路径：{outline_path}",
+        f"审核报告输出路径：{audit_report_path}",
     ]
 
-    results = await asyncio.gather(*tasks, return_exceptions=True)
+    if user_request and user_request.strip():
+        task_parts.append(f"【用户特殊要求】\n{user_request.strip()}\n请额外检查细纲是否符合以上用户要求。")
 
-    errors = []
-    success_count = 0
-    for idx, r in enumerate(results, 1):
-        if isinstance(r, Exception):
-            errors.append(str(r))
-            logger.error(f"[PLAN_WORKFLOW] [{idx}/{len(world_files)}] EXCEPTION: {r}")
-        elif isinstance(r, dict):
-            if r.get("success", False):
-                success_count += 1
-                logger.info(f"[PLAN_WORKFLOW] [{idx}/{len(world_files)}] SUCCESS {Path(r.get('file', '')).name}")
-            else:
-                errors.extend(r.get("errors", []))
-                logger.error(f"[PLAN_WORKFLOW] [{idx}/{len(world_files)}] FAILED {Path(r.get('file', '')).name}")
+    task = "\n".join(task_parts)
 
-    logger.info(f"[PLAN_WORKFLOW] Parallel update complete: success={success_count}/{len(world_files)}, errors={len(errors)}")
-    logger.info(f"[PLAN_WORKFLOW] ====== update_world_files_parallel END ======")
-    return {"world_updated": True, "errors": errors if errors else None}
+    try:
+        logger.info(f"[PLAN_WORKFLOW] Calling outline-auditor (model={model_name})")
+        await call_subagent("outline-auditor", task, parent_model=model_name)
+        logger.info("[PLAN_WORKFLOW] outline-auditor completed successfully")
+
+        import os
+
+        if os.path.exists(audit_report_path):
+            with open(audit_report_path, encoding="utf-8") as f:
+                report_content = f.read()
+            audit_passed = parse_audit_result(report_content)
+            logger.info(f"[PLAN_WORKFLOW] Audit result: {'PASS' if audit_passed else 'FAIL'}")
+        else:
+            logger.warning(f"[PLAN_WORKFLOW] Audit report not found at {audit_report_path}, defaulting to FAIL")
+            audit_passed = False
+
+        logger.info(f"[PLAN_WORKFLOW] ====== audit_outline END (passed={audit_passed}) ======")
+        return {
+            "outline_audit_passed": audit_passed,
+            "outline_audit_round": outline_audit_round + 1,
+            "outline_audit_report": audit_report_path,
+        }
+    except Exception as e:
+        logger.error(f"[PLAN_WORKFLOW] outline-auditor failed: {e}")
+        logger.info("[PLAN_WORKFLOW] ====== audit_outline END (failed) ======")
+        return {
+            "outline_audit_passed": False,
+            "outline_audit_round": outline_audit_round + 1,
+            "errors": [f"outline-auditor failed: {e}"],
+        }
 
 
-async def update_world_files(state: NovelWorkflowState) -> dict[str, Any]:
-    world_files = state.get("world_files", [])
-    logger.info(f"[PLAN_WORKFLOW] ====== update_world_files START ======")
-    logger.info(f"[PLAN_WORKFLOW] Total world files to update: {len(world_files)}")
+def _should_revise_outline(state: NovelWorkflowState) -> str:
+    outline_audit_passed = state.get("outline_audit_passed", False)
+    outline_audit_round = state.get("outline_audit_round", 0)
 
-    if _is_parallel_enabled():
-        logger.info("[PLAN_WORKFLOW] Parallel execution enabled")
-        return await update_world_files_parallel(state)
-    else:
-        logger.info("[PLAN_WORKFLOW] Sequential execution enabled")
-        return await update_world_files_sequential(state)
+    logger.info(f"[PLAN_WORKFLOW] _should_revise_outline: passed={outline_audit_passed}, round={outline_audit_round}")
+
+    if outline_audit_passed:
+        logger.info("[PLAN_WORKFLOW] Audit passed, route to update_outline_summary")
+        return "update_outline_summary"
+
+    if outline_audit_round >= 2:
+        logger.warning("[PLAN_WORKFLOW] Audit failed after 2 rounds, forcing update_outline_summary")
+        return "update_outline_summary"
+
+    logger.info("[PLAN_WORKFLOW] Audit failed, route to revise_outline")
+    return "revise_outline"
 
 
-def _route_after_planner(state: NovelWorkflowState) -> str:
-    route = _should_update_world(state)
-    logger.info(f"[PLAN_WORKFLOW] Routing after planner: {route}")
-    return route
+async def revise_outline(state: NovelWorkflowState) -> dict[str, Any]:
+    set_current_thread_id(state.get("thread_id"))
+
+    chapter_group = state.get("chapter_group", "")
+    model_name = state.get("model_name")
+    thread_id = state.get("thread_id")
+    user_request = state.get("user_request", "")
+    outline_audit_round = state.get("outline_audit_round", 0)
+
+    logger.info(f"[PLAN_WORKFLOW] ====== revise_outline START (round={outline_audit_round}) ======")
+    logger.info(f"[PLAN_WORKFLOW] chapter_group={chapter_group}, model_name={model_name}")
+
+    novel_base = get_novel_base(thread_id=thread_id)
+    if not novel_base:
+        logger.error("[PLAN_WORKFLOW] Failed to get novel_base in revise_outline")
+        raise ValueError("无法获取小说根目录，请检查全局变量 novel_toc")
+
+    outline_path = f"{novel_base}/01-规划/chapters/{chapter_group}-细纲.md"
+    audit_report_path = f"{novel_base}/04-审稿/{chapter_group}-审核报告.md"
+    modify_record_path = f"{novel_base}/04-审稿/{chapter_group}-修改记录.md"
+
+    logger.info(f"[PLAN_WORKFLOW] outline_path={outline_path}")
+    logger.info(f"[PLAN_WORKFLOW] audit_report_path={audit_report_path}")
+    logger.info(f"[PLAN_WORKFLOW] modify_record_path={modify_record_path}")
+
+    task_parts = [
+        "请根据审核报告修改细纲。",
+        f"章节范围：{chapter_group}",
+        f"小说根目录：{novel_base}",
+        f"待修改细纲路径：{outline_path}",
+        f"审核报告路径：{audit_report_path}",
+        f"修改记录输出路径：{modify_record_path}",
+    ]
+
+    if user_request and user_request.strip():
+        task_parts.append(f"【用户特殊要求】\n{user_request.strip()}\n请在修改时参考以上用户要求。")
+
+    task = "\n".join(task_parts)
+
+    try:
+        logger.info(f"[PLAN_WORKFLOW] Calling outline-reviser (model={model_name})")
+        await call_subagent("outline-reviser", task, parent_model=model_name)
+        logger.info("[PLAN_WORKFLOW] outline-reviser completed successfully")
+        logger.info("[PLAN_WORKFLOW] ====== revise_outline END (success) ======")
+        return {}
+    except Exception as e:
+        logger.error(f"[PLAN_WORKFLOW] outline-reviser failed: {e}")
+        logger.info("[PLAN_WORKFLOW] ====== revise_outline END (failed) ======")
+        return {"errors": [f"outline-reviser failed: {e}"]}
+
+
+async def update_outline_summary(state: NovelWorkflowState) -> dict[str, Any]:
+    set_current_thread_id(state.get("thread_id"))
+
+    chapter_group = state.get("chapter_group", "")
+    model_name = state.get("model_name")
+    thread_id = state.get("thread_id")
+
+    logger.info("[PLAN_WORKFLOW] ====== update_outline_summary START ======")
+    logger.info(f"[PLAN_WORKFLOW] chapter_group={chapter_group}, model_name={model_name}")
+
+    novel_base = get_novel_base(thread_id=thread_id)
+    if not novel_base:
+        logger.error("[PLAN_WORKFLOW] Failed to get novel_base in update_outline_summary")
+        raise ValueError("无法获取小说根目录，请检查全局变量 novel_toc")
+
+    outline_path = f"{novel_base}/01-规划/chapters/{chapter_group}-细纲.md"
+    summary_path = f"{novel_base}/00-世界观/细纲摘要.md"
+
+    logger.info(f"[PLAN_WORKFLOW] outline_path={outline_path}")
+    logger.info(f"[PLAN_WORKFLOW] summary_path={summary_path}")
+
+    task_parts = [
+        "请根据细纲内容更新细纲摘要文档。",
+        f"章节范围：{chapter_group}",
+        f"小说根目录：{novel_base}",
+        f"细纲路径：{outline_path}",
+        f"细纲摘要路径：{summary_path}",
+    ]
+
+    task = "\n".join(task_parts)
+
+    try:
+        logger.info(f"[PLAN_WORKFLOW] Calling outline-summarizer (model={model_name})")
+        await call_subagent("outline-summarizer", task, parent_model=model_name)
+        logger.info("[PLAN_WORKFLOW] outline-summarizer completed successfully")
+        logger.info("[PLAN_WORKFLOW] ====== update_outline_summary END (success) ======")
+        return {"outline_summary_updated": True}
+    except Exception as e:
+        logger.error(f"[PLAN_WORKFLOW] outline-summarizer failed: {e}")
+        logger.info("[PLAN_WORKFLOW] ====== update_outline_summary END (failed) ======")
+        return {"outline_summary_updated": False, "errors": [f"outline-summarizer failed: {e}"]}
 
 
 def create_plan_workflow() -> StateGraph:
@@ -362,8 +286,9 @@ def create_plan_workflow() -> StateGraph:
     workflow = StateGraph(NovelWorkflowState)
 
     workflow.add_node("call_planner", call_planner)
-    workflow.add_node("scan_world_files", scan_world_files)
-    workflow.add_node("update_world_files", update_world_files)
+    workflow.add_node("audit_outline", audit_outline)
+    workflow.add_node("revise_outline", revise_outline)
+    workflow.add_node("update_outline_summary", update_outline_summary)
 
     workflow.set_entry_point("call_planner")
 
@@ -371,14 +296,24 @@ def create_plan_workflow() -> StateGraph:
         "call_planner",
         _route_after_planner,
         {
-            "scan_world_files": "scan_world_files",
+            "audit_outline": "audit_outline",
+            "update_outline_summary": "update_outline_summary",
             "end_no_update": END,
             "end_with_error": END,
         },
     )
 
-    workflow.add_edge("scan_world_files", "update_world_files")
-    workflow.add_edge("update_world_files", END)
+    workflow.add_conditional_edges(
+        "audit_outline",
+        _should_revise_outline,
+        {
+            "revise_outline": "revise_outline",
+            "update_outline_summary": "update_outline_summary",
+        },
+    )
+
+    workflow.add_edge("revise_outline", "audit_outline")
+    workflow.add_edge("update_outline_summary", END)
 
     logger.info("[PLAN_WORKFLOW] Plan workflow created successfully")
     return workflow.compile()
