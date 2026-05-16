@@ -70,34 +70,13 @@ class LoopDetectedNotice:
     KEY = "deerflow_loop_detected"
 
 
-def _extract_text(chunk: ChatGenerationChunk) -> str:
-    """Pull all newly-emitted text out of a streamed chunk.
-
-    Three sources must be considered — small models can loop in any of them:
-
-    1. ``message.content`` (string)
-         — the common case, plain assistant reply.
-    2. ``message.content`` (list of content blocks)
-         — Anthropic with thinking, Vertex Gemini, multimodal models.
-    3. ``message.tool_call_chunks`` / ``additional_kwargs.tool_calls``
-         — the model is **writing a tool call** whose ``arguments`` field is
-         being streamed.  Real production case: a small model calls
-         ``write_file(content="...")`` and loops inside the ``content``
-         JSON value.  The chars never appear in ``message.content`` so we
-         must mine them out of the tool-call delta here.
-
-    All extracted text is concatenated.  We do **not** maintain separate
-    detectors per source because in practice a model is either in "text"
-    mode or "tool call" mode for any given stream — the merged stream
-    preserves the loop signal correctly.
-    """
+def _extract_content_text(chunk: ChatGenerationChunk) -> str:
+    """Extract text from ``message.content`` only (string or list of blocks)."""
     message = getattr(chunk, "message", None)
     if message is None:
         return ""
 
     parts: list[str] = []
-
-    # --- Source 1 & 2: assistant content ---
     content = getattr(message, "content", None)
     if isinstance(content, str):
         if content:
@@ -107,16 +86,24 @@ def _extract_text(chunk: ChatGenerationChunk) -> str:
             if isinstance(block, str):
                 parts.append(block)
             elif isinstance(block, dict):
-                # Common shapes: {"type":"text","text":"..."},
-                # {"type":"input_text","text":"..."}, {"content":"..."}
                 text = block.get("text") or block.get("content") or ""
                 if isinstance(text, str) and text:
                     parts.append(text)
 
-    # --- Source 3: tool-call argument deltas ---
-    # LangChain exposes per-chunk increments via ``tool_call_chunks`` on
-    # AIMessageChunk.  Each entry is a dict-like with an ``args`` (str)
-    # field containing the JSON arguments delta for that call.
+    return "".join(parts)
+
+
+def _extract_tool_args(chunk: ChatGenerationChunk) -> str:
+    """Extract raw argument deltas from ``tool_call_chunks``.
+
+    Returns the concatenated ``args`` strings from all tool-call chunks
+    in this chunk (empty string if none).
+    """
+    message = getattr(chunk, "message", None)
+    if message is None:
+        return ""
+
+    parts: list[str] = []
     tool_call_chunks = getattr(message, "tool_call_chunks", None) or []
     for tc in tool_call_chunks:
         if isinstance(tc, dict):
@@ -127,6 +114,15 @@ def _extract_text(chunk: ChatGenerationChunk) -> str:
             parts.append(args)
 
     return "".join(parts)
+
+
+# Minimum accumulated tool-call-args length before we start feeding them into
+# the loop detector.  Short args (e.g. ``read_file(path="xxx.md")`` ≈ 30-50 chars)
+# never cross this threshold, so they are silently ignored — preventing false
+# positives on normal multi-tool workflows.  Long args (e.g.
+# ``write_file(content="好的好的..." * 100)``) exceed it quickly and get
+# monitored for repetition loops.
+_TOOL_ARGS_ACCUMULATE_THRESHOLD = 150
 
 
 def _build_loop_break_chunk(result: LoopDetectionResult) -> ChatGenerationChunk:
@@ -177,15 +173,25 @@ class LoopGuardMixin:
             return
 
         detector = StreamLoopDetector(cfg)
+        tool_args_buf = ""
         for chunk in super()._stream(messages, stop, run_manager, **kwargs):  # type: ignore[misc]
-            text = _extract_text(chunk)
+            text = _extract_content_text(chunk)
+            tool_args = _extract_tool_args(chunk)
+            if tool_args:
+                tool_args_buf += tool_args
+                if len(tool_args_buf) >= _TOOL_ARGS_ACCUMULATE_THRESHOLD:
+                    text += tool_args_buf
+                    tool_args_buf = ""
             if text:
                 result = detector.feed(text)
                 if result.detected:
+                    tail_preview = "".join(detector._tail)
                     logger.warning(
-                        "LoopGuard: terminating sync stream — %s (total chars=%d)",
+                        "LoopGuard: terminating sync stream — %s (total chars=%d)\nTail content (last %d chars):\n%s",
                         result.reason,
                         detector.total_chars,
+                        len(tail_preview),
+                        tail_preview[-2000:] if len(tail_preview) > 2000 else tail_preview,
                     )
                     yield chunk
                     yield _build_loop_break_chunk(result)
@@ -206,15 +212,25 @@ class LoopGuardMixin:
             return
 
         detector = StreamLoopDetector(cfg)
+        tool_args_buf = ""
         async for chunk in super()._astream(messages, stop, run_manager, **kwargs):  # type: ignore[misc]
-            text = _extract_text(chunk)
+            text = _extract_content_text(chunk)
+            tool_args = _extract_tool_args(chunk)
+            if tool_args:
+                tool_args_buf += tool_args
+                if len(tool_args_buf) >= _TOOL_ARGS_ACCUMULATE_THRESHOLD:
+                    text += tool_args_buf
+                    tool_args_buf = ""
             if text:
                 result = detector.feed(text)
                 if result.detected:
+                    tail_preview = "".join(detector.tail)
                     logger.warning(
-                        "LoopGuard: terminating async stream — %s (total chars=%d)",
+                        "LoopGuard: terminating async stream — %s (total chars=%d)\nTail content (last %d chars):\n%s",
                         result.reason,
                         detector.total_chars,
+                        len(tail_preview),
+                        tail_preview[-2000:] if len(tail_preview) > 2000 else tail_preview,
                     )
                     yield chunk
                     yield _build_loop_break_chunk(result)
@@ -306,12 +322,26 @@ def _apply_instance_patches(model: BaseChatModel) -> None:
             yield from orig_stream(messages, stop, run_manager, **kwargs)
             return
         detector = StreamLoopDetector(cfg)
+        tool_args_buf = ""
         for chunk in orig_stream(messages, stop, run_manager, **kwargs):
-            text = _extract_text(chunk)
+            text = _extract_content_text(chunk)
+            tool_args = _extract_tool_args(chunk)
+            if tool_args:
+                tool_args_buf += tool_args
+                if len(tool_args_buf) >= _TOOL_ARGS_ACCUMULATE_THRESHOLD:
+                    text += tool_args_buf
+                    tool_args_buf = ""
             if text:
                 result = detector.feed(text)
                 if result.detected:
-                    logger.warning("LoopGuard: terminating sync stream — %s", result.reason)
+                    tail_preview = "".join(detector.tail)
+                    logger.warning(
+                        "LoopGuard: terminating sync stream — %s (total chars=%d)\nTail content (last %d chars):\n%s",
+                        result.reason,
+                        detector.total_chars,
+                        len(tail_preview),
+                        tail_preview[-2000:] if len(tail_preview) > 2000 else tail_preview,
+                    )
                     yield chunk
                     yield _build_loop_break_chunk(result)
                     return
@@ -324,12 +354,26 @@ def _apply_instance_patches(model: BaseChatModel) -> None:
                 yield chunk
             return
         detector = StreamLoopDetector(cfg)
+        tool_args_buf = ""
         async for chunk in orig_astream(messages, stop, run_manager, **kwargs):
-            text = _extract_text(chunk)
+            text = _extract_content_text(chunk)
+            tool_args = _extract_tool_args(chunk)
+            if tool_args:
+                tool_args_buf += tool_args
+                if len(tool_args_buf) >= _TOOL_ARGS_ACCUMULATE_THRESHOLD:
+                    text += tool_args_buf
+                    tool_args_buf = ""
             if text:
                 result = detector.feed(text)
                 if result.detected:
-                    logger.warning("LoopGuard: terminating async stream — %s", result.reason)
+                    tail_preview = "".join(detector.tail)
+                    logger.warning(
+                        "LoopGuard: terminating async stream — %s (total chars=%d)\nTail content (last %d chars):\n%s",
+                        result.reason,
+                        detector.total_chars,
+                        len(tail_preview),
+                        tail_preview[-2000:] if len(tail_preview) > 2000 else tail_preview,
+                    )
                     yield chunk
                     yield _build_loop_break_chunk(result)
                     return

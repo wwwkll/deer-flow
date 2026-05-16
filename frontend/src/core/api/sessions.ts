@@ -1,4 +1,13 @@
-import type { NovelCardData } from "@/hooks/use-auto-resume-monitor";
+export interface NovelCardData {
+  book_name: string;
+  genre: string;
+  concept: string;
+  platform: string;
+  status: string;
+  current_chapter: number;
+  target_chapters: number;
+  created_at: string;
+}
 
 /**
  * Read the novel card (card.json) for a given thread.

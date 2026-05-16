@@ -362,6 +362,24 @@ class PostgresGlobalVariablesDB(GlobalVariablesDB):
             logger.error("Failed to delete variable: %s", e)
             return False
 
+    def delete_by_key_across_threads(self, key: str) -> int:
+        """Delete a variable by key across all threads."""
+        try:
+            with self._pool.connection() as conn:
+                result = conn.execute(
+                    """
+                    DELETE FROM global_variables
+                    WHERE key = %s AND thread_id IS NOT NULL
+                """,
+                    (key,),
+                )
+                deleted = result.rowcount
+                conn.commit()
+                return deleted
+        except Exception as e:
+            logger.error("Failed to delete variable by key across threads: %s", e)
+            return 0
+
     def close(self) -> None:
         """Close database connection pool."""
         if self._pool:

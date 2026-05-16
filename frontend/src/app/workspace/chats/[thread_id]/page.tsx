@@ -51,6 +51,7 @@ export default function ChatPage() {
   const [thread, sendMessage, isUploading] = useThreadStream({
     threadId: isNewThread ? undefined : threadId,
     context: settings.context,
+    continueOnDisconnect: settings.continue_on_disconnect,
     isMock,
     onStart: (createdThreadId) => {
       setThreadId(createdThreadId);
@@ -82,9 +83,6 @@ export default function ChatPage() {
     },
     [sendMessage, threadId],
   );
-  const handleStop = useCallback(async () => {
-    await thread.stop();
-  }, [thread]);
 
   const messageListPaddingBottom = showFollowups
     ? MESSAGE_LIST_DEFAULT_PADDING_BOTTOM +
@@ -129,6 +127,13 @@ export default function ChatPage() {
       [sendMessage, threadId],
     ),
   );
+
+  const handleStop = useCallback(async () => {
+    await thread.stop();
+    if (monitorState.enabled) {
+      stopMonitor();
+    }
+  }, [thread, monitorState.enabled, stopMonitor]);
 
   return (
     <ThreadContext.Provider value={{ thread, isMock }}>
@@ -218,6 +223,12 @@ export default function ChatPage() {
                     onMonitorConfigChange={updateMonitorConfig}
                     onStartMonitor={startMonitor}
                     onStopMonitor={stopMonitor}
+                    continueOnDisconnect={
+                      settings.continue_on_disconnect
+                    }
+                    onContinueOnDisconnectChange={(value) =>
+                      setSettings("continue_on_disconnect", value)
+                    }
                   />
                 ) : (
                   <div

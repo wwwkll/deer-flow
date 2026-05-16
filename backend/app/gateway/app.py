@@ -62,6 +62,17 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     async with langgraph_runtime(app):
         logger.info("LangGraph runtime initialised")
 
+        # Clean up monitor-related global variables from previous sessions
+        try:
+            from deerflow.global_variables.storage import get_storage
+            storage = get_storage()
+            n1 = storage.delete_by_key_across_threads("_monitor_enabled")
+            n2 = storage.delete_by_key_across_threads("_monitor_target_chapters")
+            if n1 or n2:
+                logger.info("Cleaned up monitor variables: %d _monitor_enabled, %d _monitor_target_chapters", n1, n2)
+        except Exception:
+            logger.exception("Failed to clean up monitor variables on startup")
+
         # Start IM channel service if any channels are configured
         try:
             from app.channels.service import start_channel_service

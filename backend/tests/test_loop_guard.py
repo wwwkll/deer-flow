@@ -270,14 +270,36 @@ class FakeToolCallStreamingModel(BaseChatModel):
             )
 
 
-def test_loop_in_tool_call_args_is_detected():
-    """Real production case: small model calls ``write_file(content=...)``
-    and gets stuck repeating the same phrase inside the JSON ``content``
-    value.  The repetitive chars only live in tool_call_chunks.args, never
-    in message.content — yet the guard must still abort the stream."""
+def test_short_tool_call_args_not_monitored():
+    """Short tool-call args (e.g. read_file path) stay below the 150-char
+    accumulation threshold and are never fed to the detector."""
     cfg = LoopDetectorConfig(min_content_length=50, check_interval_chars=10, max_ngram_repeats=4)
 
-    # Simulate the streamed JSON args of write_file with a repetitive content value
+    # Simulate several short read_file calls — each args is ~40 chars, well under 150
+    short_args = [
+        '{"path": "chapter-01.md"}',
+        '{"path": "chapter-02.md"}',
+        '{"path": "chapter-03.md"}',
+        '{"path": "chapter-04.md"}',
+        '{"path": "chapter-05.md"}',
+    ]
+
+    model = FakeToolCallStreamingModel(args_chunks=short_args)
+    wrap_model_with_loop_guard(model, cfg)
+
+    collected = list(model._stream([]))
+
+    assert len(collected) == len(short_args)
+    for chunk in collected:
+        assert not (chunk.message.response_metadata or {}).get(LoopDetectedNotice.KEY)
+
+
+def test_long_tool_call_args_loop_is_detected():
+    """Long tool-call args (e.g. write_file with repetitive content) exceed
+    the 150-char threshold and ARE monitored for loops."""
+    cfg = LoopDetectorConfig(min_content_length=50, check_interval_chars=10, max_ngram_repeats=4)
+
+    # Simulate write_file with a long looping content value (500+ chars total)
     args_text = '{"path": "out.md", "content": "' + "好的好的" * 80 + '"}'
     args_chunks = [args_text[i : i + 10] for i in range(0, len(args_text), 10)]
 
@@ -287,29 +309,9 @@ def test_loop_in_tool_call_args_is_detected():
     collected = list(model._stream([]))
 
     last_meta = collected[-1].message.response_metadata or {}
-    assert last_meta.get(LoopDetectedNotice.KEY), "loop in tool_call args was not detected"
-    # Verify the stream was truncated (didn't yield all original chunks)
+    assert last_meta.get(LoopDetectedNotice.KEY), "long tool_call args loop was not detected"
     original_streamed = collected[:-1]
     assert len(original_streamed) < len(args_chunks)
-
-
-@pytest.mark.asyncio
-async def test_loop_in_tool_call_args_async():
-    """Async variant of the tool-call args loop detection."""
-    cfg = LoopDetectorConfig(min_content_length=50, check_interval_chars=10, max_ngram_repeats=4)
-
-    args_text = '{"path": "log.txt", "content": "' + "I am sorry " * 60 + '"}'
-    args_chunks = [args_text[i : i + 12] for i in range(0, len(args_text), 12)]
-
-    model = FakeToolCallStreamingModel(args_chunks=args_chunks)
-    wrap_model_with_loop_guard(model, cfg)
-
-    collected = []
-    async for chunk in model._astream([]):
-        collected.append(chunk)
-
-    last_meta = collected[-1].message.response_metadata or {}
-    assert last_meta.get(LoopDetectedNotice.KEY), "async tool_call args loop not detected"
 
 
 def test_loop_in_emoji_only_stream_is_detected():

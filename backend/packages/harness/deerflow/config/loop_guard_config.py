@@ -80,9 +80,9 @@ class LoopGuardConfig(BaseModel):
         ),
     )
     max_ngram_repeats: int = Field(
-        default=4,
+        default=30,
         ge=2,
-        le=50,
+        le=100,
         description=(
             "Number of times an exact suffix must repeat in the tail window "
             "before Layer A flags a loop."
@@ -90,10 +90,10 @@ class LoopGuardConfig(BaseModel):
     )
 
     clause_window: int = Field(
-        default=8,
+        default=32,
         ge=3,
-        le=50,
-        description="How many recent clauses Layer B inspects.",
+        le=64,
+        description="How many recent clauses Layer B inspects.  Larger windows catch multi-block rotation loops.",
     )
     max_clause_repeats: int = Field(
         default=4,

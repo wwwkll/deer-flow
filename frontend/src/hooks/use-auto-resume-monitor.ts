@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 
-import { getNovelCard, listChapterFiles } from "@/core/api/sessions";
+import { listChapterFiles } from "@/core/api/sessions";
 import {
   setThreadVariable,
   deleteThreadVariable,
@@ -12,31 +12,19 @@ import {
 // Types
 // ---------------------------------------------------------------------------
 
-export interface NovelCardData {
-  book_name: string;
-  genre: string;
-  concept: string;
-  platform: string;
-  status: string;
-  current_chapter: number;
-  target_chapters: number;
-  created_at: string;
-}
-
 export interface MonitorConfig {
   idleTimeoutMinutes: number; // default 10
+  targetChapters: number; // target chapters set by user
 }
 
 export interface MonitorState {
   enabled: boolean;
   config: MonitorConfig;
   dialogOpen: boolean;
-  cardPath: string; // display path (without /mnt prefix)
-  currentChapter: number;
+  novelPath: string; // display path (without /mnt prefix)
   targetChapters: number;
   // Validation state
   novelTocSet: boolean; // whether novel_toc is configured
-  cardJsonExists: boolean; // whether card.json exists
   validationError: string; // error message if validation fails
   // File-based chapter detection
   detectedChapters: number[]; // chapter numbers found in 02-正文/
@@ -50,7 +38,10 @@ const MAX_STOP_WINDOW_MS = 2 * 60 * 1000; // 2 minutes
 const STOP_COUNT_THRESHOLD = 3; // 3 consecutive fast stops
 const PAUSE_RETRY_MS = 10 * 60 * 1000; // 10 minutes
 const MAX_RETRY_ROUNDS = 1; // 1 retry round then permanent stop
-const CARD_REFRESH_INTERVAL_MS = 30_000; // 30 seconds
+const CHAPTER_REFRESH_INTERVAL_MS = 30_000; // 30 seconds
+
+const VAR_MONITOR_ENABLED = "_monitor_enabled";
+const VAR_MONITOR_TARGET_CHAPTERS = "_monitor_target_chapters";
 
 // ---------------------------------------------------------------------------
 // Build resume prompt
@@ -60,10 +51,26 @@ function buildResumePrompt(
   detectedChapters: number[],
   targetChapters: number,
 ): string {
-  const detectedStr =
-    detectedChapters.length > 0
-      ? detectedChapters.map((c) => `第${c}章`).join(", ")
+  const sorted = [...detectedChapters].sort((a, b) => a - b);
+
+  const recent5 = sorted.slice(-5);
+  const recentStr =
+    recent5.length > 0
+      ? recent5.map((c) => `第${c}章`).join("、")
       : "无";
+
+  let missingInfo = "";
+  if (sorted.length > 0) {
+    const maxDetected = sorted[sorted.length - 1]!;
+    const missing: number[] = [];
+    for (let ch = 1; ch <= maxDetected; ch++) {
+      if (!detectedChapters.includes(ch)) missing.push(ch);
+    }
+    if (missing.length > 0) {
+      missingInfo =
+        `同时检测到第${missing.join("、")}章缺失，请自行补充后继续写。`;
+    }
+  }
 
   return (
     `<system_notification>\n` +
@@ -72,7 +79,7 @@ function buildResumePrompt(
     `【执行流程】处理长任务（一次写多章节）时，请按照以下步骤循环执行：\n` +
     `依次调用writing工作流，直到完成全部计划章节，禁止直接写作。\n\n` +
     `若还没有生成正文规划（02-正文\第n-m章\_task\写作任务汇总.md）则调用整理工作流（organize），禁止直接写作。\n\n` +
-    `【判断条件】系统通过扫描 02-正文 目录下的文件来判断进度。当前已识别到的章节文件：${detectedStr}。\n` +
+    `【判断条件】距离目标章节${targetChapters}章，最近5章已检测到：${recentStr}。${missingInfo}\n` +
     `系统要求在目标章节附近至少识别到 5 个章节文件才算完成。\n\n` +
     `⚠️ 重要：请确保每章文件名严格使用「第N章.md」格式（N为章节号，纯数字，无多余空格）。\n` +
     `   如果你已经写完所有章节但系统仍在监控，请自行检查文件名是否符合规范。\n` +
@@ -92,7 +99,7 @@ interface ThreadRuntime {
   retryRound: number;
   idleTimerId: ReturnType<typeof setTimeout> | null;
   retryTimerId: ReturnType<typeof setTimeout> | null;
-  cardRefreshTimerId: ReturnType<typeof setInterval> | null;
+  chapterRefreshTimerId: ReturnType<typeof setInterval> | null;
   novelToc: string; // "/mnt/shared-data/..."
   getIsLoading: () => boolean;
   doSendMessage: (msg: string) => Promise<void>;
@@ -105,13 +112,13 @@ function getRuntime(threadId: string): ThreadRuntime {
   if (!rt) {
     rt = {
       enabled: false,
-      config: { idleTimeoutMinutes: 10 },
+      config: { idleTimeoutMinutes: 10, targetChapters: 0 },
       stopTimes: [],
       errorStage: "idle",
       retryRound: 0,
       idleTimerId: null,
       retryTimerId: null,
-      cardRefreshTimerId: null,
+      chapterRefreshTimerId: null,
       novelToc: "",
       getIsLoading: () => false,
       doSendMessage: async () => {
@@ -124,7 +131,7 @@ function getRuntime(threadId: string): ThreadRuntime {
 }
 
 // ---------------------------------------------------------------------------
-// Core logic: called immediately when run stops (isLoading: true → false)
+// Core logic: check if target chapters are complete
 // ---------------------------------------------------------------------------
 
 function hasRequiredChapters(detected: number[], target: number): boolean {
@@ -145,16 +152,10 @@ async function onRunStopped(rt: ThreadRuntime, threadId: string) {
   if (!rt.enabled || rt.errorStage === "stopped") return;
   if (!rt.novelToc) return;
 
-  // 1. Read card.json for target_chapters
-  let card: NovelCardData;
-  try {
-    card = await getNovelCard(threadId, rt.novelToc);
-  } catch {
-    toast.warning("监控：读取 card.json 失败，将在下次停止时重试");
-    return;
-  }
+  const targetChapters = rt.config.targetChapters;
+  if (!targetChapters || targetChapters <= 0) return;
 
-  // 2. Scan chapter files
+  // 1. Scan chapter files
   let detected: number[];
   try {
     detected = await listChapterFiles(threadId, rt.novelToc);
@@ -162,20 +163,22 @@ async function onRunStopped(rt: ThreadRuntime, threadId: string) {
     detected = [];
   }
 
-  // 3. Should we resume? Check if last 5 chapters before target are present
-  if (hasRequiredChapters(detected, card.target_chapters)) {
+  // 2. Should we resume? Check if last 5 chapters before target are present
+  if (hasRequiredChapters(detected, targetChapters)) {
     toast.info(
-      `监控：已检测到目标章节（第${card.target_chapters}章附近），无需续传`,
+      `监控：已检测到目标章节（第${targetChapters}章附近），无需续传`,
     );
+    // Target completed - clean up the target chapters variable
+    deleteThreadVariable(threadId, VAR_MONITOR_TARGET_CHAPTERS).catch(() => {});
     return;
   }
 
-  // 4. Notify user that we detected a stop and will wait
+  // 3. Notify user that we detected a stop and will wait
   const timeoutMs = rt.config.idleTimeoutMinutes * 60 * 1000;
   const missing: number[] = [];
-  const requiredCount = Math.min(5, card.target_chapters);
-  const start = Math.max(1, card.target_chapters - requiredCount + 1);
-  for (let ch = start; ch <= card.target_chapters; ch++) {
+  const requiredCount = Math.min(5, targetChapters);
+  const start = Math.max(1, targetChapters - requiredCount + 1);
+  for (let ch = start; ch <= targetChapters; ch++) {
     if (!detected.includes(ch)) missing.push(ch);
   }
   toast.info(
@@ -188,15 +191,6 @@ async function onRunStopped(rt: ThreadRuntime, threadId: string) {
     if (!rt.enabled) return;
     if (rt.getIsLoading()) return;
 
-    // Re-read card.json to get latest target
-    let latestCard: NovelCardData;
-    try {
-      latestCard = await getNovelCard(threadId, rt.novelToc);
-    } catch {
-      toast.warning("监控：续传前读取 card.json 失败，跳过本次续传");
-      return;
-    }
-
     // Re-scan chapter files
     let latestDetected: number[];
     try {
@@ -205,16 +199,33 @@ async function onRunStopped(rt: ThreadRuntime, threadId: string) {
       latestDetected = [];
     }
 
+    // Re-read target chapters from global variable (may have been updated)
+    let latestTarget = rt.config.targetChapters;
+    try {
+      const vars = await fetchThreadVariables(threadId);
+      const targetVar = vars.variables.find(
+        (v) => v.key === VAR_MONITOR_TARGET_CHAPTERS,
+      );
+      if (targetVar?.value) {
+        latestTarget = parseInt(targetVar.value, 10);
+        if (!isNaN(latestTarget) && latestTarget > 0) {
+          rt.config.targetChapters = latestTarget;
+        }
+      }
+    } catch {
+      // use cached value
+    }
+
     // Check again if resume is still needed
-    if (hasRequiredChapters(latestDetected, latestCard.target_chapters)) {
+    if (hasRequiredChapters(latestDetected, latestTarget)) {
       toast.info("监控：续传前检查发现章节已齐全，取消续传");
+      deleteThreadVariable(threadId, VAR_MONITOR_TARGET_CHAPTERS).catch(
+        () => {},
+      );
       return;
     }
 
-    const prompt = buildResumePrompt(
-      latestDetected,
-      latestCard.target_chapters,
-    );
+    const prompt = buildResumePrompt(latestDetected, latestTarget);
     try {
       toast.success("监控：正在发送续传消息...");
       await rt.doSendMessage(prompt);
@@ -245,9 +256,9 @@ function maybeHandleErrorPattern(rt: ThreadRuntime, threadId: string) {
           clearTimeout(rt.idleTimerId);
           rt.idleTimerId = null;
         }
-        if (rt.cardRefreshTimerId) {
-          clearInterval(rt.cardRefreshTimerId);
-          rt.cardRefreshTimerId = null;
+        if (rt.chapterRefreshTimerId) {
+          clearInterval(rt.chapterRefreshTimerId);
+          rt.chapterRefreshTimerId = null;
         }
         toast.warning(
           `LLM 接口持续报错，监控暂停，${PAUSE_RETRY_MS / 60000} 分钟后重试`,
@@ -265,9 +276,9 @@ function maybeHandleErrorPattern(rt: ThreadRuntime, threadId: string) {
           clearTimeout(rt.idleTimerId);
           rt.idleTimerId = null;
         }
-        if (rt.cardRefreshTimerId) {
-          clearInterval(rt.cardRefreshTimerId);
-          rt.cardRefreshTimerId = null;
+        if (rt.chapterRefreshTimerId) {
+          clearInterval(rt.chapterRefreshTimerId);
+          rt.chapterRefreshTimerId = null;
         }
         toast.error("LLM 接口持续报错，监控已自动关闭");
       }
@@ -287,13 +298,11 @@ export function useAutoResumeMonitor(
 ) {
   const [monitorState, setMonitorState] = useState<MonitorState>({
     enabled: false,
-    config: { idleTimeoutMinutes: 10 },
+    config: { idleTimeoutMinutes: 10, targetChapters: 0 },
     dialogOpen: false,
-    cardPath: "",
-    currentChapter: 0,
+    novelPath: "",
     targetChapters: 0,
     novelTocSet: false,
-    cardJsonExists: false,
     validationError: "",
     detectedChapters: [],
   });
@@ -322,7 +331,7 @@ export function useAutoResumeMonitor(
     return () => {
       if (rt.idleTimerId) clearTimeout(rt.idleTimerId);
       if (rt.retryTimerId) clearTimeout(rt.retryTimerId);
-      if (rt.cardRefreshTimerId) clearInterval(rt.cardRefreshTimerId);
+      if (rt.chapterRefreshTimerId) clearInterval(rt.chapterRefreshTimerId);
       runtimes.delete(threadId);
     };
   }, [threadId]);
@@ -330,7 +339,7 @@ export function useAutoResumeMonitor(
   // Event-driven: detect isLoading true→false transition
   const prevLoadingRef = useRef(false);
 
-  // Restore monitor state from persisted global variable on mount
+  // Restore monitor state from persisted global variables on mount
   const restoredRef = useRef(false);
   useEffect(() => {
     if (!threadId || !novelToc || restoredRef.current) return;
@@ -342,17 +351,32 @@ export function useAutoResumeMonitor(
     fetchThreadVariables(threadId)
       .then((data) => {
         const monitorVar = data.variables.find(
-          (v) => v.key === "_monitor_enabled",
+          (v) => v.key === VAR_MONITOR_ENABLED,
         );
+        const targetVar = data.variables.find(
+          (v) => v.key === VAR_MONITOR_TARGET_CHAPTERS,
+        );
+
         if (monitorVar?.value === "true") {
-          const cardPath = novelToc.replace(/^\/mnt/, "") + "/card.json";
+          const novelPath = novelToc.replace(/^\/mnt/, "");
+          const targetChapters = targetVar?.value
+            ? parseInt(targetVar.value, 10)
+            : 0;
 
           rt.novelToc = novelToc;
+          if (!isNaN(targetChapters) && targetChapters > 0) {
+            rt.config.targetChapters = targetChapters;
+          }
 
           setMonitorState((prev) => ({
             ...prev,
             enabled: true,
-            cardPath,
+            novelPath,
+            targetChapters: isNaN(targetChapters) ? 0 : targetChapters,
+            config: {
+              ...prev.config,
+              targetChapters: isNaN(targetChapters) ? 0 : targetChapters,
+            },
           }));
 
           // Sync prevLoadingRef with current state so next transition is detected
@@ -405,27 +429,44 @@ export function useAutoResumeMonitor(
     rt.config = monitorState.config;
   }, [threadId, monitorState]);
 
-  // Card refresh loop (every 30s when monitoring, with immediate first read)
+  // Chapter refresh loop (every 30s when monitoring, with immediate first scan)
   useEffect(() => {
     if (!threadId || !novelToc) return;
     const rt = getRuntime(threadId);
 
-    if (monitorState.enabled && !rt.cardRefreshTimerId) {
+    if (monitorState.enabled && !rt.chapterRefreshTimerId) {
       const doRefresh = async () => {
         try {
-          const card = await getNovelCard(threadId, rt.novelToc);
           let detected: number[] = [];
           try {
             detected = await listChapterFiles(threadId, rt.novelToc);
           } catch {
             // ignore scan errors
           }
+
+          // Re-read target chapters from global variable
+          let targetChapters = rt.config.targetChapters;
+          try {
+            const vars = await fetchThreadVariables(threadId);
+            const targetVar = vars.variables.find(
+              (v) => v.key === VAR_MONITOR_TARGET_CHAPTERS,
+            );
+            if (targetVar?.value) {
+              const parsed = parseInt(targetVar.value, 10);
+              if (!isNaN(parsed) && parsed > 0) {
+                targetChapters = parsed;
+                rt.config.targetChapters = parsed;
+              }
+            }
+          } catch {
+            // use cached value
+          }
+
           setMonitorState((prev) => ({
             ...prev,
-            currentChapter: card.current_chapter,
-            targetChapters: card.target_chapters,
-            cardJsonExists: true,
+            targetChapters,
             detectedChapters: detected,
+            config: { ...prev.config, targetChapters },
           }));
         } catch {
           // ignore refresh errors
@@ -433,13 +474,13 @@ export function useAutoResumeMonitor(
       };
 
       void doRefresh();
-      rt.cardRefreshTimerId = setInterval(
+      rt.chapterRefreshTimerId = setInterval(
         () => void doRefresh(),
-        CARD_REFRESH_INTERVAL_MS,
+        CHAPTER_REFRESH_INTERVAL_MS,
       );
-    } else if (!monitorState.enabled && rt.cardRefreshTimerId) {
-      clearInterval(rt.cardRefreshTimerId);
-      rt.cardRefreshTimerId = null;
+    } else if (!monitorState.enabled && rt.chapterRefreshTimerId) {
+      clearInterval(rt.chapterRefreshTimerId);
+      rt.chapterRefreshTimerId = null;
     }
   }, [threadId, novelToc, monitorState.enabled]);
 
@@ -497,32 +538,22 @@ export function useAutoResumeMonitor(
         ...prev,
         dialogOpen: true,
         novelTocSet: false,
-        cardJsonExists: false,
         validationError: "未设置小说路径，无法监控",
       }));
       return;
     }
 
-    const cardPath = novelToc.replace(/^\/mnt/, "") + "/card.json";
+    const novelPath = novelToc.replace(/^\/mnt/, "");
     setMonitorState((prev) => ({
       ...prev,
       dialogOpen: true,
-      cardPath,
+      novelPath,
       novelTocSet: true,
       validationError: "",
     }));
 
-    // Try to read card.json and scan chapter files
-    getNovelCard(threadId!, novelToc)
-      .then((card) => {
-        setMonitorState((prev) => ({
-          ...prev,
-          currentChapter: card.current_chapter,
-          targetChapters: card.target_chapters,
-          cardJsonExists: true,
-        }));
-        return listChapterFiles(threadId!, novelToc);
-      })
+    // Scan chapter files for display
+    listChapterFiles(threadId!, novelToc)
       .then((detected) => {
         setMonitorState((prev) => ({
           ...prev,
@@ -530,11 +561,7 @@ export function useAutoResumeMonitor(
         }));
       })
       .catch(() => {
-        setMonitorState((prev) => ({
-          ...prev,
-          cardJsonExists: false,
-          validationError: "card.json 不存在，无法监控",
-        }));
+        // ignore
       });
   }, [threadId, novelToc]);
 
@@ -557,27 +584,25 @@ export function useAutoResumeMonitor(
     rt.retryRound = 0;
     rt.stopTimes = [];
 
-    const cardPath = novelToc.replace(/^\/mnt/, "") + "/card.json";
+    const targetChapters = monitorState.config.targetChapters;
+    if (!targetChapters || targetChapters <= 0) {
+      toast.error("请设置目标写作章节");
+      return;
+    }
+
+    const novelPath = novelToc.replace(/^\/mnt/, "");
 
     setMonitorState((prev) => ({
       ...prev,
-      cardPath,
+      novelPath,
       enabled: true,
       dialogOpen: false,
+      targetChapters,
       validationError: "",
     }));
 
-    // Read initial card state and scan chapter files
-    getNovelCard(threadId, novelToc)
-      .then((card) => {
-        setMonitorState((prev) => ({
-          ...prev,
-          currentChapter: card.current_chapter,
-          targetChapters: card.target_chapters,
-          cardJsonExists: true,
-        }));
-        return listChapterFiles(threadId, novelToc);
-      })
+    // Scan chapter files for initial display
+    listChapterFiles(threadId, novelToc)
       .then((detected) => {
         setMonitorState((prev) => ({
           ...prev,
@@ -585,20 +610,24 @@ export function useAutoResumeMonitor(
         }));
       })
       .catch(() => {
-        // Keep monitoring enabled even if card read fails initially
+        // Keep monitoring enabled even if scan fails initially
       });
 
-    // Persist monitor state to thread-level global variable
-    setThreadVariable(threadId, "_monitor_enabled", {
+    // Persist monitor state to thread-level global variables
+    setThreadVariable(threadId, VAR_MONITOR_ENABLED, {
       value: "true",
       description: "Auto-resume monitor enabled state",
       llm_editable: false,
-    }).catch(() => {
-      // Silently ignore persistence errors
-    });
+    }).catch(() => {});
+
+    setThreadVariable(threadId, VAR_MONITOR_TARGET_CHAPTERS, {
+      value: String(targetChapters),
+      description: "监控目标章节",
+      llm_editable: false,
+    }).catch(() => {});
 
     toast.success("监控已启动");
-  }, [threadId, novelToc]);
+  }, [threadId, novelToc, monitorState.config.targetChapters]);
 
   const stopMonitor = useCallback(
     (permanent = false) => {
@@ -612,9 +641,9 @@ export function useAutoResumeMonitor(
         clearTimeout(rt.retryTimerId);
         rt.retryTimerId = null;
       }
-      if (rt.cardRefreshTimerId) {
-        clearInterval(rt.cardRefreshTimerId);
-        rt.cardRefreshTimerId = null;
+      if (rt.chapterRefreshTimerId) {
+        clearInterval(rt.chapterRefreshTimerId);
+        rt.chapterRefreshTimerId = null;
       }
       rt.enabled = false;
       rt.errorStage = permanent ? "stopped" : "idle";
@@ -625,16 +654,17 @@ export function useAutoResumeMonitor(
         ...prev,
         enabled: false,
         dialogOpen: false,
-        cardPath: "",
-        currentChapter: 0,
+        novelPath: "",
         targetChapters: 0,
         detectedChapters: [],
+        config: { ...prev.config, targetChapters: 0 },
       }));
 
-      // Remove monitor state from thread-level global variable
-      deleteThreadVariable(threadId, "_monitor_enabled").catch(() => {
-        // Silently ignore persistence errors
-      });
+      // Remove monitor state from thread-level global variables
+      deleteThreadVariable(threadId, VAR_MONITOR_ENABLED).catch(() => {});
+      deleteThreadVariable(threadId, VAR_MONITOR_TARGET_CHAPTERS).catch(
+        () => {},
+      );
 
       if (permanent) {
         toast.error("监控已自动关闭（LLM 接口持续报错）");

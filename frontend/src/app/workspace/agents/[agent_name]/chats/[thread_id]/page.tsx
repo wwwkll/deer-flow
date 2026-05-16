@@ -53,6 +53,7 @@ export default function AgentChatPage() {
   const [thread, sendMessage] = useThreadStream({
     threadId: isNewThread ? undefined : threadId,
     context: { ...settings.context, agent_name: agent_name },
+    continueOnDisconnect: settings.continue_on_disconnect,
     onStart: (createdThreadId) => {
       setThreadId(createdThreadId);
       setIsNewThread(false);
@@ -87,10 +88,6 @@ export default function AgentChatPage() {
     },
     [sendMessage, threadId, agent_name],
   );
-
-  const handleStop = useCallback(async () => {
-    await thread.stop();
-  }, [thread]);
 
   const messageListPaddingBottom = showFollowups
     ? MESSAGE_LIST_DEFAULT_PADDING_BOTTOM +
@@ -135,6 +132,13 @@ export default function AgentChatPage() {
       [sendMessage, threadId],
     ),
   );
+
+  const handleStop = useCallback(async () => {
+    await thread.stop();
+    if (monitorState.enabled) {
+      stopMonitor();
+    }
+  }, [thread, monitorState.enabled, stopMonitor]);
 
   return (
     <ThreadContext.Provider value={{ thread }}>
@@ -242,6 +246,12 @@ export default function AgentChatPage() {
                   onMonitorConfigChange={updateMonitorConfig}
                   onStartMonitor={startMonitor}
                   onStopMonitor={stopMonitor}
+                  continueOnDisconnect={
+                    settings.continue_on_disconnect
+                  }
+                  onContinueOnDisconnectChange={(value) =>
+                    setSettings("continue_on_disconnect", value)
+                  }
                 />
                 {env.NEXT_PUBLIC_STATIC_WEBSITE_ONLY === "true" && (
                   <div className="text-muted-foreground/67 w-full translate-y-12 text-center text-xs">

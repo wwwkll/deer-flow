@@ -27,6 +27,7 @@ export type ThreadStreamOptions = {
   threadId?: string | null | undefined;
   context: LocalSettings["context"];
   isMock?: boolean;
+  continueOnDisconnect?: boolean;
   onStart?: (threadId: string) => void;
   onFinish?: (state: AgentThreadState) => void;
   onToolEnd?: (event: ToolEndEvent) => void;
@@ -138,6 +139,7 @@ export function useThreadStream({
   threadId,
   context,
   isMock,
+  continueOnDisconnect = true,
   onStart,
   onFinish,
   onToolEnd,
@@ -496,6 +498,7 @@ export function useThreadStream({
             streamSubgraphs: true,
             streamResumable: true,
             multitaskStrategy: "interrupt",
+            onDisconnect: continueOnDisconnect ? "continue" : "cancel",
             config: {
               recursion_limit: 1000,
             },

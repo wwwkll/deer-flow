@@ -130,6 +130,8 @@ export function InputBox({
   onMonitorConfigChange,
   onStartMonitor,
   onStopMonitor,
+  continueOnDisconnect,
+  onContinueOnDisconnectChange,
   ...props
 }: Omit<ComponentProps<typeof PromptInput>, "onSubmit"> & {
   assistantId?: string | null;
@@ -165,6 +167,8 @@ export function InputBox({
   onMonitorConfigChange?: (config: Partial<MonitorConfig>) => void;
   onStartMonitor?: () => void;
   onStopMonitor?: () => void;
+  continueOnDisconnect?: boolean;
+  onContinueOnDisconnectChange?: (value: boolean) => void;
 }) {
   const { t } = useI18n();
   const searchParams = useSearchParams();
@@ -1076,6 +1080,32 @@ export function InputBox({
               </div>
             )}
 
+            {/* Target chapters - only shown when not monitoring */}
+            {!monitorState?.enabled && (
+              <div>
+                <label className="text-sm font-medium">
+                  目标写作章节
+                </label>
+                <input
+                  type="number"
+                  min={1}
+                  max={9999}
+                  defaultValue={monitorState?.config.targetChapters || ""}
+                  placeholder="例如：50"
+                  className="border-input focus-visible:ring-ring mt-1.5 flex h-9 w-full rounded-md border bg-transparent px-3 py-1 text-sm shadow-xs transition-colors focus-visible:ring-1 focus-visible:outline-none"
+                  onChange={(e) => {
+                    const value = parseInt(e.target.value, 10);
+                    if (value >= 1) {
+                      onMonitorConfigChange?.({ targetChapters: value });
+                    }
+                  }}
+                />
+                <p className="text-muted-foreground mt-1 text-xs">
+                  写作完成的目标章节号，系统将监控到该章节完成为止
+                </p>
+              </div>
+            )}
+
             <div>
               <label className="text-sm font-medium">续传消息</label>
               <div className="text-muted-foreground bg-muted mt-1 rounded-md px-3 py-2 text-xs">
@@ -1092,24 +1122,45 @@ export function InputBox({
               </div>
             </div>
 
+            <div className="flex items-center gap-2.5 border-t pt-3">
+              <input
+                type="checkbox"
+                id="continue-on-disconnect"
+                checked={continueOnDisconnect ?? true}
+                onChange={(e) =>
+                  onContinueOnDisconnectChange?.(e.target.checked)
+                }
+                className="border-input size-4 rounded accent-primary"
+              />
+              <label
+                htmlFor="continue-on-disconnect"
+                className="cursor-pointer text-sm font-medium leading-none"
+              >
+                浏览器关闭后继续执行
+              </label>
+            </div>
+            <p className="text-muted-foreground -mt-2 pl-6 text-xs">
+              关闭后后台任务继续运行，重新打开页面可恢复查看进度
+            </p>
+
             {/* Live status - only shown when monitoring */}
-            {monitorState?.enabled && monitorState.cardPath && (
+            {monitorState?.enabled && monitorState.novelPath && (
               <div className="space-y-2 border-t pt-3">
                 <label className="text-sm font-medium">实时状态</label>
                 <div className="space-y-1">
                   <div className="flex justify-between text-xs">
-                    <span className="text-muted-foreground">card.json</span>
+                    <span className="text-muted-foreground">小说路径</span>
                     <span
                       className="text-foreground max-w-[200px] truncate text-right font-mono"
-                      title={monitorState.cardPath}
+                      title={monitorState.novelPath}
                     >
-                      {monitorState.cardPath}
+                      {monitorState.novelPath}
                     </span>
                   </div>
                   <div className="flex justify-between text-xs">
                     <span className="text-muted-foreground">目标章节</span>
                     <span className="text-foreground">
-                      {monitorState.targetChapters}
+                      {monitorState.targetChapters || "-"}
                     </span>
                   </div>
                   <div className="flex justify-between text-xs">
@@ -1186,7 +1237,9 @@ export function InputBox({
                 <Button
                   className="bg-emerald-600 text-white hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-50"
                   disabled={
-                    !monitorState?.novelTocSet || !monitorState?.cardJsonExists
+                    !monitorState?.novelTocSet ||
+                    !monitorState?.config.targetChapters ||
+                    monitorState.config.targetChapters <= 0
                   }
                   onClick={() => {
                     onMonitorClose?.();

@@ -13,19 +13,38 @@ import {
 // ---------------------------------------------------------------------------
 
 describe("buildResumePrompt", () => {
-  test("generates correct prompt with detected chapters", () => {
-    const prompt = _testBuildResumePrompt([96, 97, 98], 100);
+  test("generates correct prompt with detected chapters (shows recent 5)", () => {
+    const prompt = _testBuildResumePrompt(
+      [1, 2, 3, 96, 97, 98, 99, 100],
+      100,
+    );
     expect(prompt).toContain("【自动续传监控】");
-    expect(prompt).toContain("目标完成到第100章");
-    expect(prompt).toContain("第96章, 第97章, 第98章");
+    expect(prompt).toContain("距离目标章节100章");
+    expect(prompt).toContain("第96章、第97章、第98章、第99章、第100章");
+    expect(prompt).not.toContain("第1章");
     expect(prompt).toContain("<system_notification>");
     expect(prompt).toContain("</system_notification>");
   });
 
+  test("shows missing chapters when gaps exist", () => {
+    const prompt = _testBuildResumePrompt([1, 2, 4, 46, 47], 50);
+    expect(prompt).toContain("距离目标章节50章");
+    expect(prompt).toContain("最近5章已检测到：第1章、第2章、第4章、第46章、第47章");
+    expect(prompt).toContain("第3、5、6");
+    expect(prompt).toContain("章缺失");
+    expect(prompt).toContain("请自行补充后继续写");
+  });
+
+  test("no missing info when chapters are contiguous", () => {
+    const prompt = _testBuildResumePrompt([1, 2, 3, 4, 5], 10);
+    expect(prompt).toContain("第1章、第2章、第3章、第4章、第5章");
+    expect(prompt).not.toContain("缺失");
+  });
+
   test("generates prompt with no detected chapters", () => {
     const prompt = _testBuildResumePrompt([], 50);
-    expect(prompt).toContain("当前已识别到的章节文件：无");
-    expect(prompt).toContain("目标完成到第50章");
+    expect(prompt).toContain("最近5章已检测到：无");
+    expect(prompt).toContain("距离目标章节50章");
   });
 
   test("includes file naming instruction", () => {
@@ -38,7 +57,17 @@ describe("buildResumePrompt", () => {
     const prompt = _testBuildResumePrompt([], 5);
     expect(prompt).toContain("你正在被自动续传系统监控");
     expect(prompt).toContain("严格按照步骤逐章写作");
-    expect(prompt).toContain("整理规划 → 写作 → 审核 → 修改");
+    expect(prompt).toContain("writing工作流");
+  });
+
+  test("shows fewer than 5 chapters when less than 5 detected", () => {
+    const prompt = _testBuildResumePrompt([20], 50);
+    expect(prompt).toContain("最近5章已检测到：第20章");
+  });
+
+  test("detects multiple missing chapters", () => {
+    const prompt = _testBuildResumePrompt([1, 5, 10], 15);
+    expect(prompt).toContain("第2、3、4、6、7、8、9章缺失");
   });
 });
 

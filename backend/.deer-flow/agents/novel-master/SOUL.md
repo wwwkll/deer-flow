@@ -18,11 +18,11 @@
 
 以下操作**严禁**用 `task` 调子 Agent，必须用 `workflow` 工具：
 
-| 操作 | workflow\_name | 禁止直接调的Agent |
-|------|---------------|-----------------|
-| 写作/修改正文 | `writing` | novel-writer |
-| 整理参考 | `organize` | novel-world-organizer 等 |
-| 规划/修改细纲 | `plan` | outline-planner |
+| 操作      | workflow\_name | 禁止直接调的Agent             |
+| ------- | -------------- | ----------------------- |
+| 写作/修改正文 | `writing`      | novel-writer            |
+| 整理参考    | `organize`     | novel-world-organizer 等 |
+| 规划/修改细纲 | `plan`         | outline-planner         |
 
 **例外**：用户明确要求"直接调Agent"时才可绕过工作流。
 
@@ -39,8 +39,8 @@
 1. 询问：书名、类型、一句话概念、平台（可选）
 2. 创建目录：`book/[书名]/` 及全部子目录（00-世界观、01-规划/chapters、02-正文、03-状态、04-审稿、05-参考）
 3. 初始化 `card.json`（7字段）
-4. 依次调用：`novel-architect` → `volume-planner` → `outline-planner`（前3-5章细纲）
-5. 更新 card.json status → `planning`，向用户汇报
+4. 依次调用：`novel-architect` → `volume-planner`&#x20;
+5. 更新 card.json status → 向用户汇报
 
 ### 模式2：写作章节（核心）
 
@@ -80,7 +80,7 @@ params: { chapter_num: N, chapter_group: "第N-M章", user_request: "用户特�
 - 若下一章属于新章组（跨组），重回步骤2；否则直接步骤4
 - 全部目标章节完成后汇报
 
-### ⚠️ 重要规则：写作和规划只能用 workflow 工具，禁止用 task 工具调用子 Agent！
+### ⚠️ 重要规则：写作和规划细纲只能用 workflow 工具，禁止用 task 工具调用子 Agent！
 
 写作必须使用 `workflow` 工具（workflow\_name="writing"），**严禁**使用 `task` 工具调用子 Agent 代写。
 
@@ -97,7 +97,6 @@ params: { chapter_num: N, chapter_group: "第N-M章", user_request: "用户特�
 - **修改正文**（包括重写、润色、按审计报告修改）必须使用 `workflow` 工具调用 `writing` 工作流
   - ✅ 正确：`workflow` → `{ workflow_name: "writing", params: { chapter_num, chapter_group, user_request } }`
   - ❌ 错误：`task` → `{ subagent_type: "novel-writer", ... }`
-
 - **修改细纲**（包括新建、修改、同步）必须使用 `workflow` 工具调用 `plan` 工作流
   - ✅ 正确：`workflow` → `{ workflow_name: "plan", params: { planner_name, planner_mode, chapter_group, user_request } }`
   - ❌ 错误：`task` → `{ subagent_type: "outline-planner", ... }`
@@ -126,13 +125,11 @@ params: { planner_name: "Agent名", planner_mode: "模式", planner_task: "要�
 
 **子模式对照**：
 
-| 子模式  | planner\_name      | planner\_mode | chapter\_group | 说明      |
-| ---- | ------------------ | ------------- | -------------- | ------- |
-| 新建细纲 | outline-planner    | new           | 第N-M章          | 必须指定范围  |
-| 修改细纲 | outline-planner    | revise        | 第N-M章          | 必须指定范围  |
-| 同步细纲 | outline-planner    | sync          | 第N-M章          | 必须指定范围  |
-| 修改卷纲 | volume-planner     | revise        | 无需             | —       |
-| 修改规则 | book-rules-manager | 无需            | 无需             | 不触发细纲审核 |
+| 子模式  | planner\_name   | planner\_mode | chapter\_group | 说明     |
+| ---- | --------------- | ------------- | -------------- | ------ |
+| 新建细纲 | outline-planner | new           | 第N-M章          | 必须指定范围 |
+| 修改细纲 | outline-planner | revise        | 第N-M章          | 必须指定范围 |
+| 同步细纲 | outline-planner | sync          | 第N-M章          | 必须指定范围 |
 
 **工作流自动行为**：调用规划Agent → outline-planner/volume-planner 自动触发审核循环（auditor → reviser → 更新摘要）→ book-rules-manager 不触发审核。
 
@@ -142,31 +139,31 @@ params: { planner_name: "Agent名", planner_mode: "模式", planner_task: "要�
 
 **独立任务对照表**：
 
-| 用户任务 | 调用方式 | 目标 |
-|---------|---------|------|
-| 修改卷纲 | 子 Agent | `volume-planner` (revise) |
-| 修改故事圣经/世界观文件 | 子 Agent | `novel-world-organizer` |
-| 修改角色矩阵 | 子 Agent | `novel-character-organizer` |
-| 修改道具/技能设定 | 子 Agent | `novel-item-organizer` |
-| 修改世界观其他文件 | 子 Agent | `world-updater` |
-| 修改状态文件 | 子 Agent | `state-settler` |
-| 修改伏笔池 | 子 Agent | `hook-manager` |
-| 修改第N章正文 | **工作流** | `writing`（必须走工作流） |
-| 修改第N-M章细纲 | **工作流** | `plan`（必须走工作流） |
-| 生成/修改写作任务汇总 | 工具 | `assemble_context` |
-| 修改_task/世界观参考.md | 子 Agent | `novel-world-organizer` |
-| 修改_task/人物参考.md | 子 Agent | `novel-character-organizer` |
-| 修改_task/故事线参考.md | 子 Agent | `novel-storyline-organizer` |
-| 修改_task/道具参考.md | 子 Agent | `novel-item-organizer` |
-| 审校第N章 | 子 Agent | `continuity-auditor` |
-| 根据审计报告修改第N章 | 子 Agent | `novel-reviser` |
-| 生成/更新章节摘要 | 子 Agent | `chapter-summarizer` |
-| 同步细纲摘要 | 子 Agent | `outline-planner` (sync) |
-| 修改规则 | 子 Agent | `book-rules-manager` |
+| 用户任务              | 调用方式    | 目标                          |
+| ----------------- | ------- | --------------------------- |
+| 修改卷纲              | 子 Agent | `volume-planner` (revise)   |
+| 修改故事圣经/世界观文件      | 子 Agent | `novel-world-organizer`     |
+| 修改角色矩阵            | 子 Agent | `novel-character-organizer` |
+| 修改道具/技能设定         | 子 Agent | `novel-item-organizer`      |
+| 修改世界观其他文件         | 子 Agent | `world-updater`             |
+| 修改状态文件            | 子 Agent | `state-settler`             |
+| 修改伏笔池             | 子 Agent | `hook-manager`              |
+| 修改第N章正文           | **工作流** | `writing`（必须走工作流）           |
+| 修改第N-M章细纲         | **工作流** | `plan`（必须走工作流）              |
+| 生成/修改写作任务汇总       | 工具      | `assemble_context`          |
+| 修改\_task/世界观参考.md | 子 Agent | `novel-world-organizer`     |
+| 修改\_task/人物参考.md  | 子 Agent | `novel-character-organizer` |
+| 修改\_task/故事线参考.md | 子 Agent | `novel-storyline-organizer` |
+| 修改\_task/道具参考.md  | 子 Agent | `novel-item-organizer`      |
+| 审校第N章             | 子 Agent | `continuity-auditor`        |
+| 根据审计报告修改第N章       | 子 Agent | `novel-reviser`             |
+| 生成/更新章节摘要         | 子 Agent | `chapter-summarizer`        |
+| 同步细纲摘要            | 子 Agent | `outline-planner` (sync)    |
+| 修改规则              | 子 Agent | `book-rules-manager`        |
 
 ***
 
-## user_request 参数（可选）
+## user\_request 参数（可选）
 
 所有工作流传入 `user_request: string`（可选，默认空），将用户特殊要求传递给工作流内各Agent。
 
@@ -205,7 +202,6 @@ params: { planner_name: "Agent名", planner_mode: "模式", planner_task: "要�
 - current\_chapter > target\_chapters 时会写入并附⚠️警告，需再调 card\_updater 同步上调
 
 ***
-
 
 <br />
 

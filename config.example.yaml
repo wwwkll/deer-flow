@@ -1,5 +1,5 @@
 # Configuration for the DeerFlow application
-config_version: 8
+config_version: 9
 
 # ============================================================================
 # Logging Configuration
@@ -56,6 +56,30 @@ models:
 
   # Local model configuration (e.g. LM Studio, Ollama)
   # 使用本地模型时建议降低 temperature、减少 max_retries、添加重复惩罚
+  #
+  # ⚠️ 重要：如果模型支持思考模式（如 Qwen-32B/72B-Thinking、DeepSeek-R1 等），
+  #   必须使用 GenericPatchedChatOpenAI 才能捕获和显示思考内容！
+  #   原生 langchain_openai:ChatOpenAI 会静默丢弃 reasoning_content。
+  #
+  # 支持思考的本地模型配置示例（推荐）：
+  # - name: qwen-thinking-local
+  #   display_name: Qwen 32B Thinking (Local)
+  #   use: deerflow.models.patched_generic_openai:GenericPatchedChatOpenAI
+  #   model: qwen3:32b
+  #   api_key: ollama               # Ollama 不需要真实 API Key，填任意值即可
+  #   base_url: http://localhost:11434/v1
+  #   request_timeout: 60000.0
+  #   max_retries: 1
+  #   max_tokens: 80000
+  #   temperature: 0.5
+  #   supports_thinking: true       # 启用思考模式后前端可显示 <思考> 内容
+  #   supports_vision: false
+  #   model_kwargs:
+  #     extra_body:
+  #       repetition_penalty: 1.2
+  #       top_p: 0.9
+  #
+  # 不支持思考的普通本地模型配置：
   - name: local-model
     display_name: Local Model
     use: langchain_openai:ChatOpenAI
@@ -75,6 +99,23 @@ models:
         presence_penalty: 0.1    # 话题新鲜度惩罚，鼓励生成新内容
         frequency_penalty: 0.2   # 词频惩罚，减少重复词汇使用
 
+  # ============================================================================
+  # 模型适配器说明（use 字段可选值）
+  # ============================================================================
+  #
+  # | 适配器 | 用途 | 是否捕获 reasoning_content |
+  # |--------|------|--------------------------|
+  # | langchain_openai:ChatOpenAI | 标准 OpenAI 兼容 API | ❌ 丢弃 |
+  # | deerflow.models.patched_generic_openai:GenericPatchedChatOpenAI | **通用** OpenAI 兼容（Ollama/LM Studio/本地模型） | ✅ 推荐 |
+  # | deerflow.models.patched_mimo:PatchedMiMoChatOpenAI | 小米 MiMo | ✅ |
+  # | deerflow.models.vllm_provider:VllmChatModel | vLLM 部署 | ✅ |
+  # | deerflow.models.patched_deepseek:PatchedChatDeepSeek | DeepSeek | ✅ |
+  # | deerflow.models.patched_openai:PatchedChatOpenAI | Gemini (via gateway) | ❌ 仅 thought_signature |
+  # | deerflow.models.patched_minimax:PatchedChatMiniMax | MiniMax | ✅ |
+  # | deerflow.models.claude_provider:ClaudeChatModel | Anthropic Claude | ✅ 原生支持 |
+  # | deerflow.models.mindie_provider:MindIEChatModel | 华为 MindIE | ✅ |
+  #
+
 # ============================================================================
 # Tool Groups Configuration
 # ============================================================================
@@ -85,6 +126,7 @@ tool_groups:
   - name: file:read
   - name: file:write
   - name: bash
+  - name: novel:tools
   - name: master:write
   - name: novel:reader
 
@@ -197,6 +239,27 @@ tools:
     group: bash
     use: deerflow.sandbox.tools:bash_tool
 
+  # Novel Tools (小说写作辅助工具)
+  - name: context_assembler
+    group: novel:tools
+    use: my_tools.context_assembler:context_assembler
+
+  - name: post_write_validator
+    group: novel:tools
+    use: my_tools.post_write_validator:post_write_validator
+
+  - name: ai_trace_detector
+    group: novel:tools
+    use: my_tools.ai_trace_detector:ai_trace_detector
+
+  - name: card_validator
+    group: novel:tools
+    use: my_tools.card_validator:card_validator
+
+  - name: card_updater
+    group: novel:tools
+    use: my_tools.card_updater:card_updater
+
   # Novel Master Writer Tool (restricted whitelist)
   # 只允许创建目录和写入 03-状态 目录下的文件
   - name: master_writer
@@ -205,9 +268,9 @@ tools:
 
   # Novel Reader Tool (restricted whitelist)
   # 只允许读取 _task/、05-参考/、02-正文/ 目录下的文件
-  - name: novel_reader
+  - name: writer_reader
     group: novel:reader
-    use: my_tools.novel_reader:novel_reader
+    use: my_tools.writer_reader:writer_reader
 
 # ============================================================================
 # Tool Search Configuration (Deferred Tool Loading)
@@ -335,6 +398,22 @@ subagents:
   workflow_parallel_enabled: true
 
   agents:
+    # 小说架构师（规划工作流调用，负责小说整体架构设计）
+    novel-architect:
+      timeout_seconds: 1800
+      max_turns: 80
+    # 小说写手（写作工作流调用，负责正文撰写）
+    novel-writer:
+      timeout_seconds: 1800
+      max_turns: 80
+    # 小说修订师（写作工作流调用，负责内容修订）
+    novel-reviser:
+      timeout_seconds: 1800
+      max_turns: 80
+    # 连续性审核员（写作工作流调用，检查剧情连贯性）
+    continuity-auditor:
+      timeout_seconds: 1200
+      max_turns: 60
     general-purpose:
       timeout_seconds: 1800
       max_turns: 160
@@ -361,6 +440,36 @@ subagents:
 checkpointer:
   type: sqlite
   connection_string: checkpoints.db
+
+# ============================================================================
+# LLM Streaming Loop Guard Configuration
+# ============================================================================
+# 检测 LLM 流式输出中的死循环并自动终止（针对本地小模型如 Qwen-1.8B/4B、Yi-Lite 等）
+# 两层检测：Layer A 抓完全重复（"好的好的好的..."）、Layer B 抓模板变体（"今天是周一，明天是周二..."）
+# 默认开启，无需修改即可使用。如需关闭：loop_guard: { enabled: false }
+
+loop_guard:
+  enabled: true
+  # 滚动窗口字符数（分析最近 N 个字符）
+  max_tail_chars: 2000
+  # 每 N 个新字符运行一次检测（越小检测越早，CPU 开销越大）
+  check_interval_chars: 60
+  # 累计 N 字符之前不检测（避免短回复误判）
+  min_content_length: 200
+  # Layer A: 后缀 n-gram 检测长度（6=短语，12=短句，24=半句，48=整段）
+  ngram_sizes: [6, 12, 24, 48]
+  # Layer A: 后缀重复几次判定循环（30=宽松，减少正常列表/排比句误判）
+  max_ngram_repeats: 30
+  # Layer B: 检查最近 N 个子句（32=覆盖约3个旋转周期，能抓4块模板循环）
+  clause_window: 32
+  # Layer B: 多少个相似子句判定循环
+  max_clause_repeats: 4
+  # Layer B: Dice 相似度阈值（0.5=保守，0.6=更严格）
+  clause_similarity_threshold: 0.5
+  # Layer B: 子句最短长度（忽略过短片段）
+  clause_min_length: 3
+  # Layer B: 子句最长长度（忽略过长散文）
+  clause_max_length: 80
 
 # ============================================================================
 # Global Variables Database Configuration

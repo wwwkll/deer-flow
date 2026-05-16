@@ -113,13 +113,15 @@ class LoopDetectorConfig:
     period: 6 for "好的好的"-style tight loops, 48 for paragraph-length
     repetition."""
 
-    max_ngram_repeats: int = 4
+    max_ngram_repeats: int = 30
     """Number of times the suffix n-gram must repeat in the tail before
     flagging a loop."""
 
     # Layer B — clause-skeleton repetition (templated variation)
-    clause_window: int = 8
-    """How many recent clauses to inspect."""
+    clause_window: int = 32
+    """How many recent clauses to inspect.  Must be large enough to span
+    multiple rotation cycles of a multi-block template loop (e.g. a
+    4-step reasoning cycle needs window >> 4 * clauses_per_step)."""
 
     max_clause_repeats: int = 4
     """How many clauses in the window must be similar to the most recent

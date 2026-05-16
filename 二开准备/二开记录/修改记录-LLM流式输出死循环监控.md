@@ -3,10 +3,14 @@
 **日期**: 2026-05-12
 **功能**: 检测 LLM 流式输出中的死循环并自动终止
 **开发者**: AI Assistant
-**版本**: v1.1
+**版本**: v1.5
 **更新历史**:
 - v1.0：基础检测（content 字段，Layer A + Layer B）
 - v1.1：补全 tool_call.args / content-block-list / emoji 流的检测盲点
+- v1.2：修复接入遗漏——补全 3 个接入点（app_config / factory / config.example.yaml）
+- v1.3：移除 tool_call_chunks 检测——避免正常多工具工作流被误判
+- v1.4：智能恢复 tool_call 检测——累积长度门槛 150 字符，短参数不检测、长内容循环可检测
+- v1.5：clause_window 8→32 覆盖旋转模板循环；日志优化输出尾部 2000 字符；max_ngram_repeats 4→30 减少对话误判
 
 ---
 
@@ -202,6 +206,8 @@ AIMessageChunk(
 | `backend/packages/harness/deerflow/models/factory.py` | `create_chat_model()` 末尾，在返回前调用 `wrap_model_with_loop_guard()`，包了 try/except 保证包裹失败不会阻断模型创建 |
 | `config.example.yaml` | 新增 `loop_guard` 配置段（带详细中文注释和调参指南）；`config_version` 从 8 bump 到 9 |
 
+> ⚠️ **v1.2 修复说明**：v1.0/v1.1 阶段只创建了算法和包装器代码（5 个新增文件），但上述 3 个接入点的修改**遗漏了**——导致功能代码存在但从未被系统调用。v1.2（2026-05-15）补全了这 3 处接入，功能才真正生效。
+
 ---
 
 ## 四、配置使用
@@ -281,11 +287,18 @@ DeerFlow 项目中**所有** LLM 调用都集中在 `deerflow.models.create_chat
 |---|---|---|---|
 | **对话回复** | `chunk.message.content` (str) | 普通聊天回复 | ✅ |
 | **多模态/思考** | `chunk.message.content` (list of dict) | Anthropic thinking、Vertex Gemini | ✅ |
-| **写文件 / 工具调用** | `chunk.message.tool_call_chunks[i].args` | `write_file(content="...")` 的 content 卡死 | ✅ |
+| **写文件 / 工具调用（长参数）** | `chunk.message.tool_call_chunks[i].args` | `write_file(content="好的好的...")` content 死循环 | ✅ v1.4 恢复（累积 ≥150 字符才检测） |
+| **工具调用（短参数）** | `chunk.message.tool_call_chunks[i].args` | `read_file(path="xxx.md")` 等短参数 | ❌ 不检测（低于 150 字符门槛） |
 | **子任务消息** | 子 agent 自己的流 | task 工具内部 LLM 死循环 | ✅ 自动 |
-| **结构化输出** | tool_call args（同上） | `with_structured_output()` | ✅ |
-| **Subagent 内 tool 调用** | 子任务的 tool_call_chunks | 子任务自己写文件死循环 | ✅ |
-| **非流式调用 `invoke()`** | `_generate` / `_agenerate` | 一次性返回，没有流可拦截 | ⚠️ 不覆盖（见下方说明） |
+| **结构化输出** | tool_call args（同上） | `with_structured_output()` | ⚠️ 仅长参数时覆盖 |
+| **Subagent 内 tool 调用** | 子任务的 tool_call_chunks | 子任务自己写文件死循环 | ⚠️ 仅长参数时覆盖 |
+| **非流式调用 `invoke()`** | `_generate` / `_agenerate` | 一次性返回，没有流可拦截 | ⚠️ 不覆盖 |
+
+**关于 tool_call_chunks 的智能过滤（v1.3→v1.4）**：
+- v1.1 曾全量覆盖，v1.3 全量移除（误判），v1.4 采用**累积长度门槛**方案
+- 短参数（如 `read_file(path="xxx.md")` ≈ 30~50 字符）：多次累积也到不了 150 字符门槛 → 不送入检测器 → 不误判
+- 长参数（如 `write_file(content="好的好的..." x 100)` ≈ 500+ 字符）：快速超过 150 字符 → 送入检测器 → 可抓循环
+- 工具调用的**重复调用**（反复调用同一工具）仍由 `LoopDetectionMiddleware` 处理
 
 **关于不覆盖的 `invoke()`**：
 - 死循环在非流式调用下不算"循环"——它就是一次性返回的长文本，loop guard 设计上只管流式
@@ -385,7 +398,7 @@ deerflow.config.app_config
 | 单字符病态 | `aaaaaaaaaaaaa...` | Layer A (smallest n) |
 | 模板变体（数字尾词） | `今天是周一，明天是周二，三天后是周三...` | Layer B (bigram Dice) |
 | 模板变体（动词尾词） | `你可以问问题，你可以查资料，你可以写代码...` | Layer B (char Dice) |
-| **工具调用 args 循环** | `write_file(content="好的好的好的...")` | Layer A，从 tool_call_chunks 提取 |
+| **工具调用 args 循环（长参数）** | `write_file(content="好的好的好的...")` | ✅ v1.4 恢复（累积 ≥150 字符门槛） |
 | **纯 Emoji 循环** | `👍👍👍👍👍👍👍👍...` | Layer A（codepoint 级） |
 | **混合 Emoji + 文本** | `好的👍好的👍好的👍...` | Layer A |
 | **Content Block List 循环** | Anthropic thinking 模式下的 `[{"type":"text",...}]` 列表里循环 | Layer A，从 content list 提取 |
@@ -411,14 +424,18 @@ deerflow.config.app_config
 - 原因：终止提示「`[deerflow] 检测到...`」本身 80+ 字符，让 aborted 总长度反而比原始流大
 - 修复：断言改成按 chunk 数判断截断（`len(collected[:-1]) < len(chunks)`），而不是按字符数
 
-**坑 3：写文件场景循环抓不到（v1.1 修复）**
+**坑 3：写文件场景循环抓不到（v1.1 修复 → v1.3 回滚 → v1.4 智能恢复）**
 - v1.0 只看 `chunk.message.content`，但模型调用 `write_file(content="...")` 时，
   循环的 content 实际上走的是 `chunk.message.tool_call_chunks[i].args`
   ——一个独立字段，content 在这种 chunk 里是空字符串
 - 表现：用户报告"小模型写文件时还是会卡死"
-- 修复：扩展 `_extract_text`，把 content（str 或 list）+ 所有 tool_call_chunks 的 args
-  **合并送给同一个检测器**。理由：一次 LLM 调用里模型要么在说话要么在写参数，
-  二者合流不会冲突，且共用 buffer 能保证跨字段的循环（极端情况）也能抓到
+- v1.1 修复：扩展 `_extract_text`，把 content（str 或 list）+ 所有 tool_call_chunks 的 args
+  **合并送给同一个检测器**
+- v1.3 回滚：生产中发现正常多工具工作流（依次 `read_file(path="...")`）被误判为循环。
+  工具调用循环由 `LoopDetectionMiddleware` 处理，loop guard 只监控 `message.content`
+- v1.4 最终方案：**累积长度门槛（150 字符）**。短参数（path/filename ≈ 30~50 字符）
+  多次累积也到不了门槛，不送入检测器；长参数（write_file content 死循环 ≥150 字符）
+  超过门槛后送入检测器。两全其美
 
 ---
 
@@ -475,7 +492,167 @@ LoopGuard: terminating async stream — templated clause '今天是周一' repea
 
 ---
 
-## 十、后续可优化方向
+## 十、v1.2 修复记录（2026-05-15）
+
+### 10.1 问题发现
+
+用户反馈本地模型调用时一次性生成 2w+ token 的死循环输出，但 loop guard 功能未生效。
+
+### 10.2 根因分析
+
+v1.0/v1.1 阶段只完成了**代码文件的创建**（5 个新增文件），但遗漏了**系统接入**（3 个修改文件）：
+
+| 修改文件 | 预期改动 | 实际状态 |
+|---|---|---|
+| `app_config.py` | 注册 `loop_guard: LoopGuardConfig` 字段 | ❌ 未改动 |
+| `factory.py` | 调用 `wrap_model_with_loop_guard()` | ❌ 未改动 |
+| `config.example.yaml` | 添加 `loop_guard` 配置段 | ❌ 未改动 |
+
+**结果**：算法代码写好了但从未被调用——等于建了发动机但没装到车上。
+
+### 10.3 修复内容
+
+补全 3 个接入点：
+
+1. **`app_config.py`**：新增 `from deerflow.config.loop_guard_config import LoopGuardConfig`，在 `AppConfig` 类中添加 `loop_guard: LoopGuardConfig = Field(default_factory=LoopGuardConfig)`
+2. **`factory.py`**：在 `create_chat_model()` 末尾、`return model_instance` 之前添加：
+   ```python
+   try:
+       loop_guard_cfg = config.loop_guard.to_detector_config()
+       if loop_guard_cfg.enabled:
+           from deerflow.models.loop_guard import wrap_model_with_loop_guard
+           wrap_model_with_loop_guard(model_instance, loop_guard_cfg)
+   except Exception:
+       logger.debug("LoopGuard wrapping failed for model '%s', continuing without guard", name, exc_info=True)
+   ```
+3. **`config.example.yaml`**：添加 `loop_guard` 配置段（带中文注释），`config_version` 从 8 bump 到 9
+
+### 10.4 验证结果
+
+```
+tests/test_loop_detector.py   — 26 passed
+tests/test_loop_guard.py      — 26 passed (含原 v1.1 测试)
+tests/test_app_config_reload.py — 3 passed
+tests/test_model_factory.py   — 35 passed
+tests/test_config_version.py  — 6 passed
+```
+
+---
+
+## 十二、v1.3 修复记录（2026-05-15）
+
+### 12.1 问题发现
+
+LoopGuard 接入后（v1.2），用户反馈线上大模型在正常工作时频繁触发截断，日志显示：
+
+```
+LoopGuard: terminating async stream — templated clause 'path:mntshareddatabook/.../xxx.md' repeated 4 times in last 5 clauses (Dice ≥ 0.5)
+```
+
+### 12.2 根因分析
+
+v1.1 为了覆盖"写文件时 content 死循环"场景，扩展了 `_extract_text` 去读取 `tool_call_chunks` 的 `args` 字段。但生产中发现：
+
+- 子 agent 正常工作时，模型会**依次调用不同工具**（如 `read_file(path="...")`、`write_file(path="...")`）
+- 这些工具参数的 `path` 值结构高度相似（都是 `path:` 开头 + 文件路径）
+- Layer B 的 Dice 相似度检测将其误判为"模板变体循环"
+
+**这是设计盲区**：工具调用循环（反复调用同一工具）应由 `LoopDetectionMiddleware` 的 hash 检测处理，不是 loop guard 的职责。
+
+### 12.3 修复内容
+
+**修改 `loop_guard.py` 的 `_extract_text`**：
+
+- **移除**对 `message.tool_call_chunks` 的 `args` 字段读取
+- **只保留**对 `message.content`（str 或 list）的提取
+- 更新 docstring 说明不监控 tool_call 的原因
+
+**修改 `test_loop_guard.py`**：
+
+- `test_loop_in_tool_call_args_is_detected` → `test_tool_call_args_not_monitored`
+- 验证工具调用 chunk 流**不被截断**、全部透传
+- 移除对应的 async 测试（`test_loop_in_tool_call_args_async`）
+
+### 12.4 验证结果
+
+```
+tests/test_loop_detector.py   — 26 passed
+tests/test_loop_guard.py      — 26 passed（含更新后的 tool_call 测试）
+```
+
+### 12.5 覆盖范围变更
+
+| 输出去向 | v1.1-v1.2 | v1.3 |
+|---|---|---|
+| 对话回复 `content` | ✅ | ✅ |
+| 多模态 content list | ✅ | ✅ |
+| 输出去向 | v1.1-v1.2 | v1.3 | v1.4 |
+|---|---|---|---|
+| 对话回复 `content` | ✅ | ✅ | ✅ |
+| 多模态 content list | ✅ | ✅ | ✅ |
+| tool_call_chunks args（短） | ✅ | ❌ 移除 | ❌ 低于 150 字符门槛 |
+| tool_call_chunks args（长） | ✅ | ❌ 移除 | ✅ 累积 ≥150 字符才检测 |
+| 子任务消息 | ✅ 自动 | ✅ 自动 | ✅ 自动 |
+| 结构化输出 | ✅ | ❌ 移除 | ⚠️ 仅长参数时覆盖 |
+
+> 工具调用的**重复调用**（反复调用同一工具）由 `LoopDetectionMiddleware` 处理。
+
+---
+
+## 十三、v1.4 修复记录（2026-05-15）
+
+### 13.1 需求
+
+v1.3 全量移除了 tool_call 检测，解决了误判问题，但也导致**写文件时 content 死循环无法检测**。用户希望恢复对长工具参数（如 `write_file(content="...")`）的检测能力，同时保持不误判正常多工具工作流。
+
+### 13.2 方案：累积长度门槛
+
+核心思路：**tool_call 的 args 分片先累积，超过 150 字符后才送入检测器**。
+
+```
+chunk1: args='{"path": "out'        → 累积 14 字符 < 150 → 不送入
+chunk2: args='.md", "content": "好'   → 累积 32 字符 < 150 → 不送入
+chunk3: args='的好的好的好的...'    → 累积 180 字符 >= 150 → 送入检测！
+```
+
+| 场景 | 单次 args 大小 | 累积结果 | 检测？ |
+|---|---|---|---|
+| `read_file(path="xxx.md")` | ~35 字符 | 多次累积仍 < 150（每次新 call 重置） | ❌ 不检测 |
+| `write_file(path="x.md", content="好的..." x 100)` | ~500+ 字符 | 快速超过 150 | ✅ 可检测循环 |
+
+### 13.3 代码改动
+
+**`loop_guard.py`**：
+- `_extract_text()` 拆分为两个函数：
+  - `_extract_content_text()` — 只提取 `message.content`
+  - `_extract_tool_args()` — 只提取 `tool_call_chunks` 的 `args`
+- 新增常量 `_TOOL_ARGS_ACCUMULATE_THRESHOLD = 150`
+- `LoopGuardMixin._stream` / `_astream` / 实例级 patch 路径：
+  - 新增 `tool_args_buf` 累积变量
+  - 每个 chunk 分别提取 content 和 tool_args
+  - tool_args 先累积到 buf，>= 150 时合并到 text 并送 detector，然后清空 buf
+- **`loop_detector.py`**：`max_ngram_repeats` 默认值从 4 提升到 30（减少对话内容误判）
+- **`loop_guard_config.py`**：同步更新默认值和上限
+- **`config.example.yaml`**：同步更新注释和默认值
+
+### 13.4 测试改动
+
+| 测试 | 变更 |
+|---|---|
+| `test_tool_call_args_not_monitored` | → 拆为两个测试 |
+| `test_short_tool_call_args_not_monitored` | **新增**：5 个短 read_file args 不触发 |
+| `test_long_tool_call_args_loop_is_detected` | **新增**：长 write_file content 循环被截断 |
+
+### 13.5 验证结果
+
+```
+tests/test_loop_detector.py   — 26 passed
+tests/test_loop_guard.py      — 27 passed（含 2 个新 tool_call 测试）
+```
+
+---
+
+## 十一、后续可优化方向
 
 1. **检测结果上报到前端**：当前只有日志和 SSE metadata；可以在前端检测 `finish_reason=loop_detected` 显示更友好的提示气泡
 2. **按 agent 配置阈值**：不同 agent 对循环容忍度不同（写小说的允许更多重复，QA 类应该更严格），可以扩展 agent 配置文件来覆盖默认阈值

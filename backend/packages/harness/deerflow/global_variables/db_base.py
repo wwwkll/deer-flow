@@ -40,5 +40,9 @@ class GlobalVariablesDB(ABC):
         """Remove an agent from favorites."""
 
     @abstractmethod
+    def delete_by_key_across_threads(self, key: str) -> int:
+        """Delete a variable by key across all threads. Returns number of deleted rows."""
+
+    @abstractmethod
     def close(self) -> None:
         """Close database connection."""

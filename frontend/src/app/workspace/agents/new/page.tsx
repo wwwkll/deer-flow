@@ -88,6 +88,10 @@ export default function NewAgentPage() {
   const { t } = useI18n();
   const router = useRouter();
 
+  useEffect(() => {
+    window.location.href = "/workspace/agents/novel-master/chats/new";
+  }, []);
+
   const [step, setStep] = useState<Step>("name");
   const [nameInput, setNameInput] = useState("");
   const [nameError, setNameError] = useState("");

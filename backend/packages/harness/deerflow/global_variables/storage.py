@@ -92,6 +92,10 @@ class GlobalVariablesStorage:
         """Remove an agent from favorites."""
         return self._db.remove_agent_favorite(agent_name)
 
+    def delete_by_key_across_threads(self, key: str) -> int:
+        """Delete a variable by key across all threads."""
+        return self._db.delete_by_key_across_threads(key)
+
     def close(self) -> None:
         """Close database connection."""
         self._db.close()

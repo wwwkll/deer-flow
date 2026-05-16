@@ -229,8 +229,7 @@ def _delete_variable(key: str, scope: str, thread_id: str | None = None) -> Vari
     if key not in variables:
         raise HTTPException(status_code=404, detail=f"Variable '{key}' not found in {scope} scope")
 
-    del variables[key]
-    data["variables"] = variables
-    get_storage().save(data, scope, thread_id=thread_id)
+    get_storage().delete(key, scope, thread_id=thread_id)
 
+    data = get_storage().load(scope, thread_id=thread_id)
     return _build_variables_response(data)
