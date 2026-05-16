@@ -63,7 +63,23 @@ DeerFlow 是一个开源的 super agent harness，本项目在其基础上二开
    OPENAI_API_KEY=your-api-key
    ```
 
-4. **启动服务**
+4. **配置共享目录（必须）**
+
+   小说写作系统的所有数据（正文、设定、状态文件等）都存储在共享目录中。编辑 `config.yaml` 中的 `sandbox.mounts` 配置：
+
+   ```yaml
+   sandbox:
+     mounts:
+       - host_path: E:\deer-flow\shared-data    # 改为你的实际路径
+         container_path: /mnt/shared-data     # 改为你的实际路径
+         read_only: false
+   ```
+
+   > **⚠️ 注意事项：**
+   > - `host_path` 必须指向**项目目录之外**的路径，否则 Agent 写入文件时会触发 `uvicorn --reload` 导致服务重启
+   > - 请确保该目录已创建且可读写
+
+5. **启动服务**
 
    ```bash
    make dev           # 本地开发
