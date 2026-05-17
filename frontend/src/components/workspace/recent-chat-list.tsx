@@ -6,6 +6,7 @@ import {
   Download,
   FileJson,
   FileText,
+  FolderX,
   MoreHorizontal,
   Pencil,
   Share2,
@@ -45,6 +46,7 @@ import {
   SidebarMenuItem,
 } from "@/components/ui/sidebar";
 import { getAPIClient } from "@/core/api";
+import { useClearCategory, useDeleteCategory } from "@/core/categories/hooks";
 import { useI18n } from "@/core/i18n/hooks";
 import {
   exportThreadAsJSON,
@@ -55,14 +57,17 @@ import {
   useRenameThread,
   useThreads,
 } from "@/core/threads/hooks";
+import { useRunningThreads } from "@/core/threads/use-running-threads";
 import type { AgentThread, AgentThreadState } from "@/core/threads/types";
 import { pathOfThread, titleOfThread } from "@/core/threads/utils";
 import { env } from "@/env";
 import { isIMEComposing } from "@/lib/ime";
+import { RunningIndicator } from "./running-indicator";
 
 function ThreadItem({
   thread,
   isActive,
+  isRunning,
   pathname,
   handleRenameClick,
   handleShare,
@@ -72,6 +77,7 @@ function ThreadItem({
 }: {
   thread: AgentThread;
   isActive: boolean;
+  isRunning: boolean;
   pathname: string;
   handleRenameClick: (threadId: string, currentTitle: string) => void;
   handleShare: (thread: AgentThread) => void;
@@ -89,6 +95,7 @@ function ThreadItem({
           >
             {titleOfThread(thread)}
           </Link>
+          {isRunning && <RunningIndicator />}
           {env.NEXT_PUBLIC_STATIC_WEBSITE_ONLY !== "true" && (
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
@@ -165,6 +172,9 @@ export function RecentChatList() {
   const { data: threads = [] } = useThreads();
   const { mutate: deleteThread } = useDeleteThread();
   const { mutate: renameThread } = useRenameThread();
+  const { mutate: clearCategory } = useClearCategory();
+  const { mutate: deleteCategory } = useDeleteCategory();
+  const { isRunning: isThreadRunning } = useRunningThreads();
 
   const [threadTags, setThreadTags] = useState<
     Record<string, string | undefined>
@@ -230,6 +240,13 @@ export function RecentChatList() {
   const [renameDialogOpen, setRenameDialogOpen] = useState(false);
   const [renameThreadId, setRenameThreadId] = useState<string | null>(null);
   const [renameValue, setRenameValue] = useState("");
+
+  const [confirmDialogOpen, setConfirmDialogOpen] = useState(false);
+  const [confirmDialogTitle, setConfirmDialogTitle] = useState("");
+  const [confirmDialogMessage, setConfirmDialogMessage] = useState("");
+  const [confirmDialogAction, setConfirmDialogAction] = useState<
+    (() => void) | null
+  >(null);
 
   const handleDelete = useCallback(
     (threadId: string) => {
@@ -313,6 +330,58 @@ export function RecentChatList() {
     [t],
   );
 
+  const showConfirmDialog = useCallback(
+    (title: string, message: string, action: () => void) => {
+      setConfirmDialogTitle(title);
+      setConfirmDialogMessage(message);
+      setConfirmDialogAction(() => action);
+      setConfirmDialogOpen(true);
+    },
+    [],
+  );
+
+  const handleClearCategory = useCallback(
+    (categoryName: string) => {
+      showConfirmDialog(
+        "清空对话",
+        `确定要清空「${categoryName}」下的所有对话吗？此操作不可恢复。`,
+        () => {
+          clearCategory(categoryName, {
+            onSuccess: (data) => {
+              toast.success(data.message);
+              void loadThreadTags();
+            },
+            onError: (err) => {
+              toast.error(err.message);
+            },
+          });
+        },
+      );
+    },
+    [clearCategory, showConfirmDialog, loadThreadTags],
+  );
+
+  const handleDeleteCategory = useCallback(
+    (categoryName: string) => {
+      showConfirmDialog(
+        "删除小说",
+        `此操作将删除分类「${categoryName}」下的所有对话，并永久删除关联的小说文件。此操作不可恢复，是否继续？`,
+        () => {
+          deleteCategory(categoryName, {
+            onSuccess: (data) => {
+              toast.success(data.message);
+              void loadThreadTags();
+            },
+            onError: (err) => {
+              toast.error(err.message);
+            },
+          });
+        },
+      );
+    },
+    [deleteCategory, showConfirmDialog, loadThreadTags],
+  );
+
   if (threads.length === 0) {
     return null;
   }
@@ -333,23 +402,58 @@ export function RecentChatList() {
                 const isExpanded = expandedGroups.has(groupKey);
                 const groupName =
                   groupKey === "__undefined__" ? "未分类" : groupKey;
+                const groupHasRunning = groupThreads.some((t) => isThreadRunning(t.thread_id));
 
                 return (
                   <div key={groupKey} className="mb-2">
-                    <button
-                      className="text-muted-foreground hover:text-foreground flex w-full items-center gap-1 px-2 py-1 text-xs font-medium"
-                      onClick={() => toggleGroup(groupKey)}
-                    >
-                      {isExpanded ? (
-                        <ChevronDown className="size-3" />
-                      ) : (
-                        <ChevronRight className="size-3" />
+                    <div className="flex items-center justify-between">
+                      <button
+                        className="text-muted-foreground hover:text-foreground flex flex-1 items-center gap-1 px-2 py-1 text-xs font-medium"
+                        onClick={() => toggleGroup(groupKey)}
+                      >
+                        {isExpanded ? (
+                          <ChevronDown className="size-3" />
+                        ) : (
+                          <ChevronRight className="size-3" />
+                        )}
+                        <span>{groupName}</span>
+                        <span className="text-muted-foreground/60">
+                          ({groupThreads.length})
+                        </span>
+                      </button>
+                      <div className="flex items-center">
+                        {groupHasRunning && <RunningIndicator />}
+                        {groupKey !== "__undefined__" && (
+                        <DropdownMenu>
+                          <DropdownMenuTrigger asChild>
+                            <button className="text-muted-foreground hover:text-foreground p-1 rounded hover:bg-muted">
+                              <MoreHorizontal className="size-3" />
+                            </button>
+                          </DropdownMenuTrigger>
+                          <DropdownMenuContent
+                            className="w-40 rounded-lg"
+                            side="right"
+                            align="start"
+                          >
+                            <DropdownMenuItem
+                              onSelect={() => handleClearCategory(groupKey)}
+                            >
+                              <FolderX className="text-muted-foreground" />
+                              <span>清空对话</span>
+                            </DropdownMenuItem>
+                            <DropdownMenuSeparator />
+                            <DropdownMenuItem
+                              onSelect={() => handleDeleteCategory(groupKey)}
+                              className="text-destructive focus:text-destructive"
+                            >
+                              <Trash2 className="text-destructive" />
+                              <span>删除小说</span>
+                            </DropdownMenuItem>
+                          </DropdownMenuContent>
+                        </DropdownMenu>
                       )}
-                      <span>{groupName}</span>
-                      <span className="text-muted-foreground/60">
-                        ({groupThreads.length})
-                      </span>
-                    </button>
+                      </div>
+                    </div>
                     {isExpanded && (
                       <div className="mt-1 ml-2">
                         {groupThreads.map((thread) => {
@@ -359,6 +463,7 @@ export function RecentChatList() {
                               key={thread.thread_id}
                               thread={thread}
                               isActive={isActive}
+                              isRunning={isThreadRunning(thread.thread_id)}
                               pathname={pathname}
                               handleRenameClick={handleRenameClick}
                               handleShare={handleShare}
@@ -404,6 +509,36 @@ export function RecentChatList() {
               {t.common.cancel}
             </Button>
             <Button onClick={handleRenameSubmit}>{t.common.save}</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={confirmDialogOpen} onOpenChange={setConfirmDialogOpen}>
+        <DialogContent className="sm:max-w-[425px]">
+          <DialogHeader>
+            <DialogTitle>{confirmDialogTitle}</DialogTitle>
+          </DialogHeader>
+          <div className="py-4">
+            <p className="text-sm text-muted-foreground">
+              {confirmDialogMessage}
+            </p>
+          </div>
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => setConfirmDialogOpen(false)}
+            >
+              {t.common.cancel}
+            </Button>
+            <Button
+              variant="destructive"
+              onClick={() => {
+                confirmDialogAction?.();
+                setConfirmDialogOpen(false);
+              }}
+            >
+              确认
+            </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

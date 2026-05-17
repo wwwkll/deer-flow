@@ -96,6 +96,10 @@ class GlobalVariablesStorage:
         """Delete a variable by key across all threads."""
         return self._db.delete_by_key_across_threads(key)
 
+    def delete_all_by_thread(self, thread_id: str) -> int:
+        """Delete all variables for a specific thread."""
+        return self._db.delete_all_by_thread(thread_id)
+
     def close(self) -> None:
         """Close database connection."""
         self._db.close()

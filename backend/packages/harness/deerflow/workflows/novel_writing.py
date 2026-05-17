@@ -1,8 +1,10 @@
 """Novel writing workflow - Writing, audit, and post-processing."""
 
+import hashlib
 import logging
 import os
 import re
+from collections import Counter
 from pathlib import Path
 from typing import Any
 
@@ -146,6 +148,14 @@ async def write_chapter(state: NovelWorkflowState) -> dict[str, Any]:
                 f"({len(chapter_content)} chars)"
             )
 
+        # 内容去重验证：检测大块段落重复
+        dedup_result = _check_content_duplication(output_path)
+        if dedup_result["has_duplication"]:
+            logger.warning(
+                f"Content duplication detected in {output_path}: "
+                f"{dedup_result['summary']}"
+            )
+
         return {"chapter_content": output_path, "chapter_group": chapter_group_normalized}
     except Exception as e:
         logger.error(f"Write chapter failed: {e}")
@@ -157,6 +167,81 @@ _PLANNING_PREFIX_PATTERNS = re.compile(
     r"^(好的[，,。]?|现在[，,]?\s*我需要|根据[，,]|首先[，,]|接下来[，,]|我需要|"
     r"本章[的]?|以下是|正文如下|第\d+章[\.。、，,])"
 )
+
+_PARAGRAPH_SPLIT_RE = re.compile(
+    r"(?:\n\s*\n|"
+    r"\u2026\u2026|"
+    r"\u2014\u2014|"
+    r"\*\*\*)"
+)
+
+_DEDUP_MIN_PARAGRAPH_LENGTH = 80
+_DEDUP_MAX_REPEATS = 2
+_DEDUP_FINGERPRINT_REPEAT_THRESHOLD = 0.3
+
+
+def _check_content_duplication(file_path: str) -> dict[str, Any]:
+    """Check a chapter file for large-block paragraph duplication.
+
+    Returns a dict with:
+        has_duplication: bool — whether problematic duplication was found
+        summary: str — human-readable description of the issue
+        duplicate_fingerprints: list of (fingerprint, count) tuples
+        total_paragraphs: int
+        unique_paragraphs: int
+    """
+    path = Path(file_path)
+    if not path.exists():
+        return {"has_duplication": False, "summary": "", "duplicate_fingerprints": [], "total_paragraphs": 0, "unique_paragraphs": 0}
+
+    try:
+        content = path.read_text(encoding="utf-8")
+    except Exception:
+        return {"has_duplication": False, "summary": "", "duplicate_fingerprints": [], "total_paragraphs": 0, "unique_paragraphs": 0}
+
+    if len(content) < 200:
+        return {"has_duplication": False, "summary": "", "duplicate_fingerprints": [], "total_paragraphs": 0, "unique_paragraphs": 0}
+
+    parts = _PARAGRAPH_SPLIT_RE.split(content)
+    paragraphs = [p.strip() for p in parts if len(p.strip()) >= _DEDUP_MIN_PARAGRAPH_LENGTH]
+
+    if not paragraphs:
+        return {"has_duplication": False, "summary": "", "duplicate_fingerprints": [], "total_paragraphs": 0, "unique_paragraphs": 0}
+
+    fingerprints = []
+    for p in paragraphs:
+        normalised = re.sub(r"\s+", " ", p.strip())
+        fp = hashlib.md5(normalised.encode("utf-8")).hexdigest()
+        fingerprints.append(fp)
+
+    fp_counts = Counter(fingerprints)
+    duplicates = [(fp, count) for fp, count in fp_counts.items() if count > _DEDUP_MAX_REPEATS]
+
+    total = len(paragraphs)
+    unique = len(fp_counts)
+
+    if duplicates:
+        dup_ratio = 1 - unique / total
+        top_dup = max(duplicates, key=lambda x: x[1])
+        summary = (
+            f"{total} paragraphs, {unique} unique ({dup_ratio:.0%} duplicated). "
+            f"Top repeated paragraph appears {top_dup[1]} times."
+        )
+        return {
+            "has_duplication": True,
+            "summary": summary,
+            "duplicate_fingerprints": duplicates,
+            "total_paragraphs": total,
+            "unique_paragraphs": unique,
+        }
+
+    return {
+        "has_duplication": False,
+        "summary": f"{total} paragraphs, {unique} unique — no duplication",
+        "duplicate_fingerprints": [],
+        "total_paragraphs": total,
+        "unique_paragraphs": unique,
+    }
 
 
 def _extract_chapter_text(raw_text: str, chapter_num: int) -> str:

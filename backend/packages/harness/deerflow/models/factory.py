@@ -148,9 +148,8 @@ def create_chat_model(name: str | None = None, thinking_enabled: bool = False, *
 
     try:
         loop_guard_cfg = config.loop_guard.to_detector_config()
-        if loop_guard_cfg.enabled:
-            from deerflow.models.loop_guard import wrap_model_with_loop_guard
-            wrap_model_with_loop_guard(model_instance, loop_guard_cfg)
+        from deerflow.models.loop_guard import wrap_model_with_loop_guard
+        wrap_model_with_loop_guard(model_instance, loop_guard_cfg)
     except Exception:
         logger.debug("LoopGuard wrapping failed for model '%s', continuing without guard", name, exc_info=True)
 

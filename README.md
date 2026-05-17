@@ -208,6 +208,7 @@ DeerFlow 小说写作系统是一个基于多 Agent 协作的 AI 小说创作平
 | card_validator | card.json 格式验证，验证并规范化小说名片格式 | [my_tools/card_validator.py](my_tools/card_validator.py) |
 | master_writer | 小说主控专用写入工具（受限白名单），只允许创建目录和写入 03-状态 目录下的文件 | [my_tools/master_writer.py](my_tools/master_writer.py) |
 | novel_reader | 小说写手专用读取工具（受限白名单），只允许读取 _task/、05-参考/、02-正文/ 目录下的文件 | [my_tools/novel_reader.py](my_tools/novel_reader.py) |
+| word_counter | 字数统计工具，统计 .md 文件字数（不含标点符号），中文按字符计、英文按单词计 | [my_tools/word_counter.py](my_tools/word_counter.py) |
 
 ### 自定义技能
 

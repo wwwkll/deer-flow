@@ -9,6 +9,7 @@ tools:
   - grep
   - write_file
   - str_replace
+  - word_counter
 # 修稿 agent 不需要任何 skill（之前未设此字段时会把所有 enabled skills 都加载进来，
 # 包括完全无关的 vercel-deploy，浪费 prompt 上下文与磁盘 IO）
 skills: []

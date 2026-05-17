@@ -30,6 +30,7 @@ Design notes
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from collections.abc import AsyncIterator, Iterator
 from typing import Any
@@ -47,8 +48,91 @@ from deerflow.models.loop_detector import (
     LoopDetectorConfig,
     StreamLoopDetector,
 )
+from deerflow.runtime.cancel_registry import clear_cancel, get_cancel_event, is_cancelled
 
 logger = logging.getLogger(__name__)
+
+
+def _get_thread_id() -> str | None:
+    try:
+        from langgraph.config import get_config
+        config = get_config()
+        return config.get("configurable", {}).get("thread_id")
+    except Exception:
+        return None
+
+
+async def _cancel_aware_anext(
+    parent_gen: AsyncIterator,
+    cancel_tid: str | None,
+) -> Any | None:
+    """Await the next chunk from *parent_gen*, but return ``None`` early
+    if the run is cancelled while waiting.
+
+    Detects cancellation via three mechanisms:
+
+    1. **cancel_registry** — set by Gateway's ``RunManager.cancel()`` or
+       by subagent executor when the parent signals stop.
+    2. **asyncio.Task.cancel()** — used by the LangGraph server when the
+       user clicks Stop.  The current task's cancelled flag is checked
+       every poll cycle.
+    3. **asyncio.CancelledError** — propagated when the task is actually
+       cancelled mid-await.
+
+    We use a polling approach (check every 0.5 s) instead of
+    ``loop.run_in_executor(None, event.wait)`` because the latter leaks
+    a thread-pool thread for every chunk: cancelling the ``Future`` does
+    **not** interrupt a blocking ``threading.Event.wait()`` call.
+    """
+    if cancel_tid is None:
+        try:
+            return await parent_gen.__anext__()
+        except StopAsyncIteration:
+            return _STOP_ITERATION_SENTINEL
+
+    cancel_event = get_cancel_event(cancel_tid)
+    if cancel_event.is_set():
+        return None
+
+    current_task = asyncio.current_task()
+    anext_task = asyncio.ensure_future(parent_gen.__anext__())
+    try:
+        while not cancel_event.is_set():
+            if current_task is not None and current_task.cancelled():
+                anext_task.cancel()
+                try:
+                    await anext_task
+                except (asyncio.CancelledError, StopAsyncIteration):
+                    pass
+                return None
+            done, _ = await asyncio.wait(
+                {anext_task},
+                timeout=0.5,
+            )
+            if done:
+                break
+        else:
+            anext_task.cancel()
+            try:
+                await anext_task
+            except (asyncio.CancelledError, StopAsyncIteration):
+                pass
+            return None
+
+        try:
+            return anext_task.result()
+        except StopAsyncIteration:
+            return _STOP_ITERATION_SENTINEL
+    except asyncio.CancelledError:
+        anext_task.cancel()
+        try:
+            await anext_task
+        except (asyncio.CancelledError, StopAsyncIteration):
+            pass
+        raise
+
+
+_STOP_ITERATION_SENTINEL = object()
 
 
 # Sentinel attribute used so we never wrap the same instance twice.
@@ -71,12 +155,26 @@ class LoopDetectedNotice:
 
 
 def _extract_content_text(chunk: ChatGenerationChunk) -> str:
-    """Extract text from ``message.content`` only (string or list of blocks)."""
+    """Extract visible reply text from ``message.content``.
+
+    Two sources are considered:
+
+    1. ``message.content`` (string) — plain assistant reply.
+    2. ``message.content`` (list of content blocks) — multimodal models.
+       Only ``{"type":"text","text":"..."}`` blocks are extracted;
+       ``{"type":"thinking","thinking":"..."}`` blocks are **excluded** (they
+       are reasoning content, handled by :func:`_extract_reasoning_text`).
+
+    ``additional_kwargs["reasoning_content"]`` is also **excluded** — reasoning
+    streams naturally contain structured lists and confirmation steps that
+    trigger false positives in Layer B's clause-similarity detection.
+    """
     message = getattr(chunk, "message", None)
     if message is None:
         return ""
 
     parts: list[str] = []
+
     content = getattr(message, "content", None)
     if isinstance(content, str):
         if content:
@@ -86,9 +184,46 @@ def _extract_content_text(chunk: ChatGenerationChunk) -> str:
             if isinstance(block, str):
                 parts.append(block)
             elif isinstance(block, dict):
+                # Skip thinking/reasoning blocks — they go to _extract_reasoning_text
+                block_type = block.get("type", "")
+                if block_type == "thinking":
+                    continue
                 text = block.get("text") or block.get("content") or ""
                 if isinstance(text, str) and text:
                     parts.append(text)
+
+    return "".join(parts)
+
+
+def _extract_reasoning_text(chunk: ChatGenerationChunk) -> str:
+    """Extract reasoning / thinking text from a chunk.
+
+    Two sources are considered:
+
+    1. ``additional_kwargs["reasoning_content"]`` — OpenAI-compatible thinking
+       models (DeepSeek, MiMo, Ollama) that stream reasoning in a separate
+       field.
+    2. ``message.content`` list entries with ``{"type":"thinking","thinking":"..."}``
+       — Anthropic native thinking blocks.
+    """
+    message = getattr(chunk, "message", None)
+    if message is None:
+        return ""
+
+    parts: list[str] = []
+
+    content = getattr(message, "content", None)
+    if isinstance(content, list):
+        for block in content:
+            if isinstance(block, dict) and block.get("type") == "thinking":
+                text = block.get("thinking")
+                if isinstance(text, str) and text:
+                    parts.append(text)
+
+    additional_kwargs = getattr(message, "additional_kwargs", None) or {}
+    reasoning_content = additional_kwargs.get("reasoning_content")
+    if isinstance(reasoning_content, str) and reasoning_content:
+        parts.append(reasoning_content)
 
     return "".join(parts)
 
@@ -125,6 +260,24 @@ def _extract_tool_args(chunk: ChatGenerationChunk) -> str:
 _TOOL_ARGS_ACCUMULATE_THRESHOLD = 150
 
 
+def _emit_loop_detected_event(result: LoopDetectionResult) -> None:
+    """Emit a custom stream event so the frontend can show a toast."""
+    try:
+        from langgraph.config import get_stream_writer
+
+        writer = get_stream_writer()
+        writer(
+            {
+                "type": "loop_detected",
+                "layer": result.layer,
+                "reason": result.reason,
+                "repeat_count": result.repeat_count,
+            }
+        )
+    except Exception:
+        logger.debug("Failed to emit loop_detected event", exc_info=True)
+
+
 def _build_loop_break_chunk(result: LoopDetectionResult) -> ChatGenerationChunk:
     """Build a final chunk that announces the loop break.
 
@@ -135,6 +288,7 @@ def _build_loop_break_chunk(result: LoopDetectionResult) -> ChatGenerationChunk:
       logs that watch finish reasons;
     * ``response_metadata[LoopDetectedNotice.KEY]`` with detection details.
     """
+    _emit_loop_detected_event(result)
     suffix = f"\n\n[deerflow] 检测到模型输出循环（{result.layer}），已自动终止：{result.reason}"
     message = AIMessageChunk(
         content=suffix,
@@ -158,6 +312,16 @@ class LoopGuardMixin:
 
     Applied via dynamic subclassing in :func:`wrap_model_with_loop_guard`;
     not intended to be instantiated directly.
+
+    Three detectors run in parallel:
+
+    * **content_detector** (Layer A + B + C) — monitors the visible reply
+      text and accumulated tool-call args.
+    * **reasoning_detector** (Layer A + C) — monitors thinking / reasoning
+      content.  Layer B is disabled because reasoning naturally contains
+      structured lists and confirmation steps that trigger false positives.
+      Layer C is enabled because large-block repetition in reasoning is
+      just as pathological as in normal content.
     """
 
     def _stream(  # type: ignore[override]
@@ -168,14 +332,40 @@ class LoopGuardMixin:
         **kwargs: Any,
     ) -> Iterator[ChatGenerationChunk]:
         cfg: LoopDetectorConfig = getattr(self, _GUARD_CONFIG_ATTR, LoopDetectorConfig())
+        _cancel_tid = _get_thread_id()
         if not cfg.enabled:
-            yield from super()._stream(messages, stop, run_manager, **kwargs)  # type: ignore[misc]
+            for chunk in super()._stream(messages, stop, run_manager, **kwargs):  # type: ignore[misc]
+                if is_cancelled(_cancel_tid):
+                    logger.info("LoopGuard: LLM sync stream cancelled for thread %s", _cancel_tid)
+                    return
+                yield chunk
             return
 
-        detector = StreamLoopDetector(cfg)
+        content_detector = StreamLoopDetector(cfg)
+        reasoning_cfg = LoopDetectorConfig(
+            enabled=cfg.enabled,
+            max_tail_chars=cfg.max_tail_chars,
+            check_interval_chars=cfg.check_interval_chars,
+            min_content_length=cfg.min_content_length,
+            ngram_sizes=cfg.ngram_sizes,
+            max_ngram_repeats=cfg.max_ngram_repeats,
+            layer_a_only=True,
+            paragraph_min_length=cfg.paragraph_min_length,
+            paragraph_window=cfg.paragraph_window,
+            max_paragraph_repeats=cfg.max_paragraph_repeats,
+            paragraph_similarity_threshold=cfg.paragraph_similarity_threshold,
+            paragraph_fuzzy_check=cfg.paragraph_fuzzy_check,
+            paragraph_tail_chars=cfg.paragraph_tail_chars,
+        )
+        reasoning_detector = StreamLoopDetector(reasoning_cfg)
         tool_args_buf = ""
+        _cancel_tid = _get_thread_id()
         for chunk in super()._stream(messages, stop, run_manager, **kwargs):  # type: ignore[misc]
+            if is_cancelled(_cancel_tid):
+                logger.info("LoopGuard: LLM sync stream cancelled for thread %s", _cancel_tid)
+                return
             text = _extract_content_text(chunk)
+            reasoning = _extract_reasoning_text(chunk)
             tool_args = _extract_tool_args(chunk)
             if tool_args:
                 tool_args_buf += tool_args
@@ -183,13 +373,27 @@ class LoopGuardMixin:
                     text += tool_args_buf
                     tool_args_buf = ""
             if text:
-                result = detector.feed(text)
+                result = content_detector.feed(text)
                 if result.detected:
-                    tail_preview = "".join(detector._tail)
+                    tail_preview = "".join(content_detector._tail)
                     logger.warning(
                         "LoopGuard: terminating sync stream — %s (total chars=%d)\nTail content (last %d chars):\n%s",
                         result.reason,
-                        detector.total_chars,
+                        content_detector.total_chars,
+                        len(tail_preview),
+                        tail_preview[-2000:] if len(tail_preview) > 2000 else tail_preview,
+                    )
+                    yield chunk
+                    yield _build_loop_break_chunk(result)
+                    return
+            if reasoning:
+                result = reasoning_detector.feed(reasoning)
+                if result.detected:
+                    tail_preview = "".join(reasoning_detector._tail)
+                    logger.warning(
+                        "LoopGuard: terminating sync stream (reasoning) — %s (total chars=%d)\nTail content (last %d chars):\n%s",
+                        result.reason,
+                        reasoning_detector.total_chars,
                         len(tail_preview),
                         tail_preview[-2000:] if len(tail_preview) > 2000 else tail_preview,
                     )
@@ -206,36 +410,86 @@ class LoopGuardMixin:
         **kwargs: Any,
     ) -> AsyncIterator[ChatGenerationChunk]:
         cfg: LoopDetectorConfig = getattr(self, _GUARD_CONFIG_ATTR, LoopDetectorConfig())
-        if not cfg.enabled:
-            async for chunk in super()._astream(messages, stop, run_manager, **kwargs):  # type: ignore[misc]
-                yield chunk
-            return
-
-        detector = StreamLoopDetector(cfg)
-        tool_args_buf = ""
-        async for chunk in super()._astream(messages, stop, run_manager, **kwargs):  # type: ignore[misc]
-            text = _extract_content_text(chunk)
-            tool_args = _extract_tool_args(chunk)
-            if tool_args:
-                tool_args_buf += tool_args
-                if len(tool_args_buf) >= _TOOL_ARGS_ACCUMULATE_THRESHOLD:
-                    text += tool_args_buf
-                    tool_args_buf = ""
-            if text:
-                result = detector.feed(text)
-                if result.detected:
-                    tail_preview = "".join(detector.tail)
-                    logger.warning(
-                        "LoopGuard: terminating async stream — %s (total chars=%d)\nTail content (last %d chars):\n%s",
-                        result.reason,
-                        detector.total_chars,
-                        len(tail_preview),
-                        tail_preview[-2000:] if len(tail_preview) > 2000 else tail_preview,
-                    )
+        _cancel_tid = _get_thread_id()
+        if _cancel_tid is not None and is_cancelled(_cancel_tid):
+            clear_cancel(_cancel_tid)
+        parent_gen = super()._astream(messages, stop, run_manager, **kwargs)  # type: ignore[misc]
+        try:
+            if not cfg.enabled:
+                while True:
+                    chunk = await _cancel_aware_anext(parent_gen, _cancel_tid)
+                    if chunk is None:
+                        logger.info("LoopGuard: LLM async stream cancelled for thread %s", _cancel_tid)
+                        return
+                    if chunk is _STOP_ITERATION_SENTINEL:
+                        return
                     yield chunk
-                    yield _build_loop_break_chunk(result)
+                return
+
+            content_detector = StreamLoopDetector(cfg)
+            reasoning_cfg = LoopDetectorConfig(
+                enabled=cfg.enabled,
+                max_tail_chars=cfg.max_tail_chars,
+                check_interval_chars=cfg.check_interval_chars,
+                min_content_length=cfg.min_content_length,
+                ngram_sizes=cfg.ngram_sizes,
+                max_ngram_repeats=cfg.max_ngram_repeats,
+                layer_a_only=True,
+                paragraph_min_length=cfg.paragraph_min_length,
+                paragraph_window=cfg.paragraph_window,
+                max_paragraph_repeats=cfg.max_paragraph_repeats,
+                paragraph_similarity_threshold=cfg.paragraph_similarity_threshold,
+                paragraph_fuzzy_check=cfg.paragraph_fuzzy_check,
+                paragraph_tail_chars=cfg.paragraph_tail_chars,
+            )
+            reasoning_detector = StreamLoopDetector(reasoning_cfg)
+            tool_args_buf = ""
+            while True:
+                chunk = await _cancel_aware_anext(parent_gen, _cancel_tid)
+                if chunk is None:
+                    logger.info("LoopGuard: LLM async stream cancelled for thread %s", _cancel_tid)
                     return
-            yield chunk
+                if chunk is _STOP_ITERATION_SENTINEL:
+                    return
+                text = _extract_content_text(chunk)
+                reasoning = _extract_reasoning_text(chunk)
+                tool_args = _extract_tool_args(chunk)
+                if tool_args:
+                    tool_args_buf += tool_args
+                    if len(tool_args_buf) >= _TOOL_ARGS_ACCUMULATE_THRESHOLD:
+                        text += tool_args_buf
+                        tool_args_buf = ""
+                if text:
+                    result = content_detector.feed(text)
+                    if result.detected:
+                        tail_preview = "".join(content_detector._tail)
+                        logger.warning(
+                            "LoopGuard: terminating async stream — %s (total chars=%d)\nTail content (last %d chars):\n%s",
+                            result.reason,
+                            content_detector.total_chars,
+                            len(tail_preview),
+                            tail_preview[-2000:] if len(tail_preview) > 2000 else tail_preview,
+                        )
+                        yield chunk
+                        yield _build_loop_break_chunk(result)
+                        return
+                if reasoning:
+                    result = reasoning_detector.feed(reasoning)
+                    if result.detected:
+                        tail_preview = "".join(reasoning_detector._tail)
+                        logger.warning(
+                            "LoopGuard: terminating async stream (reasoning) — %s (total chars=%d)\nTail content (last %d chars):\n%s",
+                            result.reason,
+                            reasoning_detector.total_chars,
+                            len(tail_preview),
+                            tail_preview[-2000:] if len(tail_preview) > 2000 else tail_preview,
+                        )
+                        yield chunk
+                        yield _build_loop_break_chunk(result)
+                        return
+                yield chunk
+        finally:
+            await parent_gen.aclose()
 
 
 def wrap_model_with_loop_guard(model: BaseChatModel, config: LoopDetectorConfig | None = None) -> BaseChatModel:
@@ -269,12 +523,6 @@ def wrap_model_with_loop_guard(model: BaseChatModel, config: LoopDetectorConfig 
     if getattr(model, _GUARD_MARKER_ATTR, False):
         return model
 
-    if not cfg.enabled:
-        # Mark anyway so downstream code can detect "guard considered" even
-        # if currently disabled — avoids unnecessary class reassignment.
-        object.__setattr__(model, _GUARD_MARKER_ATTR, True)
-        return model
-
     base_cls = type(model)
     wrap_strategy = "subclass"
     try:
@@ -295,11 +543,12 @@ def wrap_model_with_loop_guard(model: BaseChatModel, config: LoopDetectorConfig 
 
     object.__setattr__(model, _GUARD_MARKER_ATTR, True)
     logger.debug(
-        "LoopGuard enabled on %s via %s (max_ngram_repeats=%d, max_clause_repeats=%d)",
+        "LoopGuard enabled on %s via %s (max_ngram_repeats=%d, max_clause_repeats=%d, max_paragraph_repeats=%d)",
         base_cls.__name__,
         wrap_strategy,
         cfg.max_ngram_repeats,
         cfg.max_clause_repeats,
+        cfg.max_paragraph_repeats,
     )
     return model
 
@@ -318,13 +567,39 @@ def _apply_instance_patches(model: BaseChatModel) -> None:
 
     def _patched_stream(self, messages, stop=None, run_manager=None, **kwargs):
         cfg: LoopDetectorConfig = getattr(self, _GUARD_CONFIG_ATTR, LoopDetectorConfig())
+        _cancel_tid = _get_thread_id()
         if not cfg.enabled:
-            yield from orig_stream(messages, stop, run_manager, **kwargs)
+            for chunk in orig_stream(messages, stop, run_manager, **kwargs):
+                if is_cancelled(_cancel_tid):
+                    logger.info("LoopGuard: LLM sync stream cancelled for thread %s", _cancel_tid)
+                    return
+                yield chunk
             return
-        detector = StreamLoopDetector(cfg)
+        content_detector = StreamLoopDetector(cfg)
+        reasoning_cfg = LoopDetectorConfig(
+            enabled=cfg.enabled,
+            max_tail_chars=cfg.max_tail_chars,
+            check_interval_chars=cfg.check_interval_chars,
+            min_content_length=cfg.min_content_length,
+            ngram_sizes=cfg.ngram_sizes,
+            max_ngram_repeats=cfg.max_ngram_repeats,
+            layer_a_only=True,
+            paragraph_min_length=cfg.paragraph_min_length,
+            paragraph_window=cfg.paragraph_window,
+            max_paragraph_repeats=cfg.max_paragraph_repeats,
+            paragraph_similarity_threshold=cfg.paragraph_similarity_threshold,
+            paragraph_fuzzy_check=cfg.paragraph_fuzzy_check,
+            paragraph_tail_chars=cfg.paragraph_tail_chars,
+        )
+        reasoning_detector = StreamLoopDetector(reasoning_cfg)
         tool_args_buf = ""
+        _cancel_tid = _get_thread_id()
         for chunk in orig_stream(messages, stop, run_manager, **kwargs):
+            if is_cancelled(_cancel_tid):
+                logger.info("LoopGuard: LLM sync stream cancelled for thread %s", _cancel_tid)
+                return
             text = _extract_content_text(chunk)
+            reasoning = _extract_reasoning_text(chunk)
             tool_args = _extract_tool_args(chunk)
             if tool_args:
                 tool_args_buf += tool_args
@@ -332,13 +607,27 @@ def _apply_instance_patches(model: BaseChatModel) -> None:
                     text += tool_args_buf
                     tool_args_buf = ""
             if text:
-                result = detector.feed(text)
+                result = content_detector.feed(text)
                 if result.detected:
-                    tail_preview = "".join(detector.tail)
+                    tail_preview = "".join(content_detector._tail)
                     logger.warning(
                         "LoopGuard: terminating sync stream — %s (total chars=%d)\nTail content (last %d chars):\n%s",
                         result.reason,
-                        detector.total_chars,
+                        content_detector.total_chars,
+                        len(tail_preview),
+                        tail_preview[-2000:] if len(tail_preview) > 2000 else tail_preview,
+                    )
+                    yield chunk
+                    yield _build_loop_break_chunk(result)
+                    return
+            if reasoning:
+                result = reasoning_detector.feed(reasoning)
+                if result.detected:
+                    tail_preview = "".join(reasoning_detector._tail)
+                    logger.warning(
+                        "LoopGuard: terminating sync stream (reasoning) — %s (total chars=%d)\nTail content (last %d chars):\n%s",
+                        result.reason,
+                        reasoning_detector.total_chars,
                         len(tail_preview),
                         tail_preview[-2000:] if len(tail_preview) > 2000 else tail_preview,
                     )
@@ -349,35 +638,85 @@ def _apply_instance_patches(model: BaseChatModel) -> None:
 
     async def _patched_astream(self, messages, stop=None, run_manager=None, **kwargs):
         cfg: LoopDetectorConfig = getattr(self, _GUARD_CONFIG_ATTR, LoopDetectorConfig())
-        if not cfg.enabled:
-            async for chunk in orig_astream(messages, stop, run_manager, **kwargs):
-                yield chunk
-            return
-        detector = StreamLoopDetector(cfg)
-        tool_args_buf = ""
-        async for chunk in orig_astream(messages, stop, run_manager, **kwargs):
-            text = _extract_content_text(chunk)
-            tool_args = _extract_tool_args(chunk)
-            if tool_args:
-                tool_args_buf += tool_args
-                if len(tool_args_buf) >= _TOOL_ARGS_ACCUMULATE_THRESHOLD:
-                    text += tool_args_buf
-                    tool_args_buf = ""
-            if text:
-                result = detector.feed(text)
-                if result.detected:
-                    tail_preview = "".join(detector.tail)
-                    logger.warning(
-                        "LoopGuard: terminating async stream — %s (total chars=%d)\nTail content (last %d chars):\n%s",
-                        result.reason,
-                        detector.total_chars,
-                        len(tail_preview),
-                        tail_preview[-2000:] if len(tail_preview) > 2000 else tail_preview,
-                    )
+        _cancel_tid = _get_thread_id()
+        if _cancel_tid is not None and is_cancelled(_cancel_tid):
+            clear_cancel(_cancel_tid)
+        parent_gen = orig_astream(messages, stop, run_manager, **kwargs)
+        try:
+            if not cfg.enabled:
+                while True:
+                    chunk = await _cancel_aware_anext(parent_gen, _cancel_tid)
+                    if chunk is None:
+                        logger.info("LoopGuard: LLM async stream cancelled for thread %s", _cancel_tid)
+                        return
+                    if chunk is _STOP_ITERATION_SENTINEL:
+                        return
                     yield chunk
-                    yield _build_loop_break_chunk(result)
+                return
+            content_detector = StreamLoopDetector(cfg)
+            reasoning_cfg = LoopDetectorConfig(
+                enabled=cfg.enabled,
+                max_tail_chars=cfg.max_tail_chars,
+                check_interval_chars=cfg.check_interval_chars,
+                min_content_length=cfg.min_content_length,
+                ngram_sizes=cfg.ngram_sizes,
+                max_ngram_repeats=cfg.max_ngram_repeats,
+                layer_a_only=True,
+                paragraph_min_length=cfg.paragraph_min_length,
+                paragraph_window=cfg.paragraph_window,
+                max_paragraph_repeats=cfg.max_paragraph_repeats,
+                paragraph_similarity_threshold=cfg.paragraph_similarity_threshold,
+                paragraph_fuzzy_check=cfg.paragraph_fuzzy_check,
+                paragraph_tail_chars=cfg.paragraph_tail_chars,
+            )
+            reasoning_detector = StreamLoopDetector(reasoning_cfg)
+            tool_args_buf = ""
+            while True:
+                chunk = await _cancel_aware_anext(parent_gen, _cancel_tid)
+                if chunk is None:
+                    logger.info("LoopGuard: LLM async stream cancelled for thread %s", _cancel_tid)
                     return
-            yield chunk
+                if chunk is _STOP_ITERATION_SENTINEL:
+                    return
+                text = _extract_content_text(chunk)
+                reasoning = _extract_reasoning_text(chunk)
+                tool_args = _extract_tool_args(chunk)
+                if tool_args:
+                    tool_args_buf += tool_args
+                    if len(tool_args_buf) >= _TOOL_ARGS_ACCUMULATE_THRESHOLD:
+                        text += tool_args_buf
+                        tool_args_buf = ""
+                if text:
+                    result = content_detector.feed(text)
+                    if result.detected:
+                        tail_preview = "".join(content_detector._tail)
+                        logger.warning(
+                            "LoopGuard: terminating async stream — %s (total chars=%d)\nTail content (last %d chars):\n%s",
+                            result.reason,
+                            content_detector.total_chars,
+                            len(tail_preview),
+                            tail_preview[-2000:] if len(tail_preview) > 2000 else tail_preview,
+                        )
+                        yield chunk
+                        yield _build_loop_break_chunk(result)
+                        return
+                if reasoning:
+                    result = reasoning_detector.feed(reasoning)
+                    if result.detected:
+                        tail_preview = "".join(reasoning_detector._tail)
+                        logger.warning(
+                            "LoopGuard: terminating async stream (reasoning) — %s (total chars=%d)\nTail content (last %d chars):\n%s",
+                            result.reason,
+                            reasoning_detector.total_chars,
+                            len(tail_preview),
+                            tail_preview[-2000:] if len(tail_preview) > 2000 else tail_preview,
+                        )
+                        yield chunk
+                        yield _build_loop_break_chunk(result)
+                        return
+                yield chunk
+        finally:
+            await parent_gen.aclose()
 
     object.__setattr__(model, "_stream", types.MethodType(_patched_stream, model))
     object.__setattr__(model, "_astream", types.MethodType(_patched_astream, model))

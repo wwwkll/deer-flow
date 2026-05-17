@@ -32,6 +32,7 @@ Usage in ``config.yaml``::
 
 from __future__ import annotations
 
+import logging
 from typing import Any
 
 from langchain_core.language_models import LanguageModelInput
@@ -39,6 +40,8 @@ from langchain_core.messages import AIMessage, AIMessageChunk
 from langchain_core.outputs import ChatGeneration, ChatGenerationChunk, ChatResult
 from langchain_openai import ChatOpenAI
 from langchain_openai.chat_models.base import _convert_delta_to_message_chunk, _create_usage_metadata
+
+logger = logging.getLogger(__name__)
 
 
 def _extract_reasoning_from_response_message(message_dict: dict) -> tuple[str | None, str | None]:
@@ -174,6 +177,15 @@ class GenericPatchedChatOpenAI(ChatOpenAI):
             choice_message = choices[index].get("message", {})
             reasoning_content, reasoning = _extract_reasoning_from_response_message(choice_message)
 
+            logger.debug(
+                "GenericPatchedChatOpenAI._create_chat_result: choice_message keys=%s, "
+                "has_reasoning_content=%s, has_reasoning=%s, content_preview=%s",
+                list(choice_message.keys()),
+                reasoning_content is not None,
+                reasoning is not None,
+                (choice_message.get("content") or "")[:100],
+            )
+
             if reasoning_content or reasoning:
                 additional_kwargs = dict(message.additional_kwargs)
                 if reasoning_content:
@@ -246,6 +258,20 @@ class GenericPatchedChatOpenAI(ChatOpenAI):
                 if delta.get("reasoning") is not None:
                     additional_kwargs["reasoning"] = delta["reasoning"]
                 message_chunk = message_chunk.model_copy(update={"additional_kwargs": additional_kwargs})
+                logger.debug(
+                    "GenericPatchedChatOpenAI._convert_chunk: captured reasoning, "
+                    "rc_len=%s, rt_len=%s",
+                    len(reasoning_content) if reasoning_content else 0,
+                    len(reasoning_text) if reasoning_text else 0,
+                )
+            else:
+                content_in_delta = delta.get("content", "")
+                if isinstance(content_in_delta, str) and "<tool_call>" in content_in_delta:
+                    logger.debug(
+                        "GenericPatchedChatOpenAI._convert_chunk: found <arg_key> tag in content delta, "
+                        "content_preview=%s",
+                        content_in_delta[:100],
+                    )
 
         message_chunk.response_metadata["model_provider"] = "openai"
         return ChatGenerationChunk(message=message_chunk, generation_info=generation_info or None)

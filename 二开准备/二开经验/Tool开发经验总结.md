@@ -120,15 +120,65 @@ tools:
 
 ### 2.3 在 Agent 中启用工具
 
-在 `backend/.deer-flow/agents/{agent_name}/config.yaml` 中：
+在 `backend/.deer-flow/agents/{agent_name}/config.yaml` 中，有两种方式启用工具：
+
+**方式一：`tools`（工具名白名单，推荐）**
+
+直接列出 Agent 可使用的工具名称：
+
+```yaml
+name: novel-master
+tools:
+  - read_file
+  - glob
+  - grep
+  - master_writer
+  - card_validator
+  - card_updater
+  - word_counter
+  - workflow
+  - task
+```
+
+**方式二：`tool_groups`（工具组名过滤）**
+
+通过工具组名批量启用一组工具：
 
 ```yaml
 name: novel-master
 tool_groups:
   - file:read
-  - master:write      # 启用 master_writer 工具
-  - novel:tools       # 启用 card_validator 等工具
+  - master:write
+  - novel:tools
 ```
+
+**优先级**：`tools`（工具名白名单）> `tool_groups`（工具组名过滤）> 全部工具
+
+> ⚠️ **重要**：当前项目中所有 Agent 均使用 `tools`（方式一），而非 `tool_groups`。
+> 这是因为 `tools` 白名单方式更精确，可以精确控制每个 Agent 可用的工具。
+
+> ⚠️ **重要**：Agent 的 config.yaml 必须是**扁平结构**，不能嵌套。
+> `_build_subagent_from_agents_dir()` 只提取顶层 key，嵌套结构中的 `tools`/`tool_groups` 会被忽略，
+> 导致 Agent 继承所有工具（相当于无限制）。以下是错误示例：
+>
+> ```yaml
+> # ❌ 错误：嵌套结构，tools 不会被解析
+> subagent_enabled: false
+> subagents:
+>   custom_agents:
+>     novel-writer:
+>       tools:
+>         - writer_reader
+>         - write_file
+> ```
+>
+> ```yaml
+> # ✅ 正确：扁平结构
+> name: novel-writer
+> tools:
+>   - writer_reader
+>   - write_file
+> ```
 
 ### 2.4 重启服务生效
 

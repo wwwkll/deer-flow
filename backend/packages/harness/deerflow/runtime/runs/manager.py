@@ -9,6 +9,7 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 
 from .schemas import DisconnectMode, RunStatus
+from ..cancel_registry import request_cancel, clear_cancel
 
 logger = logging.getLogger(__name__)
 
@@ -106,6 +107,9 @@ class RunManager:
             action: "interrupt" keeps checkpoint, "rollback" reverts to pre-run state.
 
         Sets the abort event with the action reason and cancels the asyncio task.
+        Also signals the global cancel registry so the LLM streaming layer can
+        detect cancellation at chunk boundaries (not just at agent.astream()
+        iteration boundaries).
         Returns ``True`` if the run was in-flight and cancellation was initiated.
         """
         async with self._lock:
@@ -120,6 +124,7 @@ class RunManager:
                 record.task.cancel()
             record.status = RunStatus.interrupted
             record.updated_at = _now_iso()
+            request_cancel(record.thread_id)
         logger.info("Run %s cancelled (action=%s)", run_id, action)
         return True
 
@@ -164,6 +169,7 @@ class RunManager:
                         r.task.cancel()
                     r.status = RunStatus.interrupted
                     r.updated_at = now
+                    request_cancel(r.thread_id)
                 logger.info(
                     "Cancelled %d inflight run(s) on thread %s (strategy=%s)",
                     len(inflight),
@@ -192,6 +198,17 @@ class RunManager:
         """Return ``True`` if *thread_id* has a pending or running run."""
         async with self._lock:
             return any(r.thread_id == thread_id and r.status in (RunStatus.pending, RunStatus.running) for r in self._runs.values())
+
+    async def list_running_thread_ids(self) -> list[str]:
+        """Return deduplicated thread_ids that have pending or running runs."""
+        async with self._lock:
+            seen: set[str] = set()
+            result: list[str] = []
+            for r in self._runs.values():
+                if r.status in (RunStatus.pending, RunStatus.running) and r.thread_id not in seen:
+                    seen.add(r.thread_id)
+                    result.append(r.thread_id)
+            return result
 
     async def cleanup(self, run_id: str, *, delay: float = 300) -> None:
         """Remove a run record after an optional delay."""

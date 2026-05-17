@@ -287,6 +287,26 @@ export function useThreadStream({
       ) {
         const e = event as { type: "llm_retry"; message: string };
         toast(e.message);
+        return;
+      }
+
+      if (
+        typeof event === "object" &&
+        event !== null &&
+        "type" in event &&
+        event.type === "loop_detected" &&
+        "layer" in event &&
+        "reason" in event
+      ) {
+        const e = event as {
+          type: "loop_detected";
+          layer: string;
+          reason: string;
+          repeat_count?: number;
+        };
+        const count = e.repeat_count ? `（重复 ${e.repeat_count} 次）` : "";
+        toast.warning(`检测到模型输出循环${count}，已自动终止：${e.reason}`);
+        return;
       }
     },
     onError(error) {

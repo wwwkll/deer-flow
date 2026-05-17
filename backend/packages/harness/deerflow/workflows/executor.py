@@ -1,5 +1,6 @@
 """Workflow executor for running LangGraph workflows."""
 
+import asyncio
 import logging
 import uuid
 from datetime import datetime
@@ -8,6 +9,8 @@ from typing import Any
 from deerflow.workflows.registry import get_workflow
 
 logger = logging.getLogger(__name__)
+
+WORKFLOW_TIMEOUT_SECONDS = 900
 
 
 class WorkflowStatus:
@@ -70,8 +73,20 @@ class WorkflowExecutor:
 
             final_state = None
             config = {"recursion_limit": 100}
-            async for chunk in workflow.astream(initial_state, stream_mode="values", config=config):
-                final_state = chunk
+
+            async def _run_workflow():
+                nonlocal final_state
+                async for chunk in workflow.astream(initial_state, stream_mode="values", config=config):
+                    final_state = chunk
+
+            try:
+                await asyncio.wait_for(_run_workflow(), timeout=WORKFLOW_TIMEOUT_SECONDS)
+            except asyncio.TimeoutError:
+                logger.error(f"[WORKFLOW_EXECUTOR] Workflow {self.workflow_name} timed out after {WORKFLOW_TIMEOUT_SECONDS}s")
+                result.status = WorkflowStatus.FAILED
+                result.error = f"Workflow execution timed out after {WORKFLOW_TIMEOUT_SECONDS} seconds"
+                result.completed_at = datetime.now()
+                return result
 
             if final_state is None:
                 result.result = {}

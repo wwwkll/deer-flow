@@ -4,6 +4,8 @@ description: |
   小说创作系统主控Agent，负责协调所有子Agent完成小说创作任务。
   接收用户指令，判断任务类型，调用合适的子Agent，管理整个创作流程。
   支持：新建小说、写作章节、修改章节、规划细纲/卷纲、查看状态。
+  .
+  .
 model: sonnet
 effort: high
 tools:

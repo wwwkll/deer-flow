@@ -260,6 +260,10 @@ tools:
     group: novel:tools
     use: my_tools.card_updater:card_updater
 
+  - name: word_counter
+    group: novel:tools
+    use: my_tools.word_counter:word_counter
+
   # Novel Master Writer Tool (restricted whitelist)
   # 只允许创建目录和写入 03-状态 目录下的文件
   - name: master_writer
@@ -426,16 +430,16 @@ subagents:
       max_turns: 60
     # 细纲审核师（规划工作流调用，审核细纲质量）
     outline-auditor:
-      timeout_seconds: 600
-      max_turns: 40
-    # 细纲修改师（规划工作流调用，根据审核报告修改细纲）
-    outline-reviser:
-      timeout_seconds: 600
-      max_turns: 40
-    # 细纲摘要维护师（规划工作流调用，更新细纲摘要文档）
-    outline-summarizer:
       timeout_seconds: 300
       max_turns: 30
+    # 细纲修改师（规划工作流调用，根据审核报告修改细纲）
+    outline-reviser:
+      timeout_seconds: 300
+      max_turns: 30
+    # 细纲摘要维护师（规划工作流调用，更新细纲摘要文档）
+    outline-summarizer:
+      timeout_seconds: 180
+      max_turns: 20
 
 checkpointer:
   type: sqlite
@@ -451,21 +455,22 @@ checkpointer:
 loop_guard:
   enabled: true
   # 滚动窗口字符数（分析最近 N 个字符）
-  max_tail_chars: 2000
-  # 每 N 个新字符运行一次检测（越小检测越早，CPU 开销越大）
-  check_interval_chars: 60
-  # 累计 N 字符之前不检测（避免短回复误判）
-  min_content_length: 200
-  # Layer A: 后缀 n-gram 检测长度（6=短语，12=短句，24=半句，48=整段）
-  ngram_sizes: [6, 12, 24, 48]
-  # Layer A: 后缀重复几次判定循环（30=宽松，减少正常列表/排比句误判）
-  max_ngram_repeats: 30
-  # Layer B: 检查最近 N 个子句（32=覆盖约3个旋转周期，能抓4块模板循环）
-  clause_window: 32
-  # Layer B: 多少个相似子句判定循环
-  max_clause_repeats: 4
-  # Layer B: Dice 相似度阈值（0.5=保守，0.6=更严格）
-  clause_similarity_threshold: 0.5
+  # 8000 字符 ≈ 5000 token，能容纳 50 次 × 160 字符的循环周期，确保不会漏判
+  max_tail_chars: 8000
+  # 每 N 个新字符运行一次检测（200=频率适中，CPU 开销可接受）
+  check_interval_chars: 200
+  # 累计 N 字符之前不检测（2000≈1300 token，允许大量输出后再检测，零误判优先）
+  min_content_length: 2000
+  # Layer A: 后缀 n-gram 检测长度（n=6 已移除，短词如 shared/global 易误判）
+  ngram_sizes: [12, 24, 48]
+  # Layer A: 后缀重复几次判定循环（50=非常宽松，真正的死循环会快速达到）
+  max_ngram_repeats: 50
+  # Layer B: 检查最近 N 个子句（48=覆盖约4个旋转周期）
+  clause_window: 48
+  # Layer B: 多少个相似子句判定循环（6=宽松）
+  max_clause_repeats: 6
+  # Layer B: Dice 相似度阈值（0.6=严格，减少自然相似句误判）
+  clause_similarity_threshold: 0.6
   # Layer B: 子句最短长度（忽略过短片段）
   clause_min_length: 3
   # Layer B: 子句最长长度（忽略过长散文）

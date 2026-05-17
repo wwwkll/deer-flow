@@ -5,12 +5,18 @@ Re-exports the public API of :mod:`~deerflow.runtime.runs` and
 directly from ``deerflow.runtime``.
 """
 
+from .cancel_registry import clear_cancel, get_cancel_event, is_cancelled, request_cancel
 from .runs import ConflictError, DisconnectMode, RunManager, RunRecord, RunStatus, UnsupportedStrategyError, run_agent
 from .serialization import serialize, serialize_channel_values, serialize_lc_object, serialize_messages_tuple
 from .store import get_store, make_store, reset_store, store_context
 from .stream_bridge import END_SENTINEL, HEARTBEAT_SENTINEL, MemoryStreamBridge, StreamBridge, StreamEvent, make_stream_bridge
 
 __all__ = [
+    # cancel_registry
+    "clear_cancel",
+    "get_cancel_event",
+    "is_cancelled",
+    "request_cancel",
     # runs
     "ConflictError",
     "DisconnectMode",

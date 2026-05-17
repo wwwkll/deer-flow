@@ -403,3 +403,143 @@ def test_loop_in_content_block_list_is_detected():
     collected = list(model._stream([]))
     last_meta = collected[-1].message.response_metadata or {}
     assert last_meta.get(LoopDetectedNotice.KEY), "content-block-list loop not detected"
+
+
+class FakeReasoningContentStreamingModel(BaseChatModel):
+    """Streams chunks whose thinking content is in ``additional_kwargs.reasoning_content``.
+
+    Mimics OpenAI-compatible thinking models (MiMo, DeepSeek, Ollama) that
+    stream reasoning in a separate field rather than inside ``content``.
+    """
+
+    reasoning_chunks: list[str] = []
+
+    @property
+    def _llm_type(self) -> str:
+        return "fake-reasoning-streaming"
+
+    def _generate(self, messages, stop=None, run_manager=None, **kwargs) -> ChatResult:  # type: ignore[override]
+        raise NotImplementedError
+
+    def _stream(  # type: ignore[override]
+        self,
+        messages: list[BaseMessage],
+        stop: list[str] | None = None,
+        run_manager: CallbackManagerForLLMRun | None = None,
+        **kwargs: Any,
+    ) -> Iterator[ChatGenerationChunk]:
+        for piece in self.reasoning_chunks:
+            yield ChatGenerationChunk(
+                message=AIMessageChunk(
+                    content="",
+                    additional_kwargs={"reasoning_content": piece},
+                )
+            )
+
+
+def test_loop_in_reasoning_content_is_detected():
+    """When the model loops inside ``reasoning_content`` (MiMo/DeepSeek style),
+    the guard must detect it.  Reasoning uses a stricter threshold (≥80 repeats)
+    so we need enough data to trigger it."""
+    cfg = LoopDetectorConfig(min_content_length=50, check_interval_chars=10, max_ngram_repeats=4)
+
+    reasoning_text = "好的好的" * 500
+    chunks = [reasoning_text[i : i + 10] for i in range(0, len(reasoning_text), 10)]
+
+    model = FakeReasoningContentStreamingModel(reasoning_chunks=chunks)
+    wrap_model_with_loop_guard(model, cfg)
+
+    collected = list(model._stream([]))
+    last_meta = collected[-1].message.response_metadata or {}
+    assert last_meta.get(LoopDetectedNotice.KEY), "reasoning_content loop not detected"
+
+
+def test_loop_in_anthropic_thinking_block_is_detected():
+    """When the model loops inside an Anthropic-style thinking block
+    (``{"type": "thinking", "thinking": "..."}``), the guard must detect it.
+    Reasoning uses a stricter threshold (≥80 repeats) so we need enough data."""
+    cfg = LoopDetectorConfig(min_content_length=50, check_interval_chars=10, max_ngram_repeats=4)
+
+    thinking_text = "好的好的" * 500
+    full_text = "Let me think. " + thinking_text
+    blocks = [[{"type": "thinking", "thinking": full_text[i : i + 10]}] for i in range(0, len(full_text), 10)]
+
+    model = FakeContentListStreamingModel(blocks=blocks)
+    wrap_model_with_loop_guard(model, cfg)
+
+    collected = list(model._stream([]))
+    last_meta = collected[-1].message.response_metadata or {}
+    assert last_meta.get(LoopDetectedNotice.KEY), "Anthropic thinking-block loop not detected"
+
+
+def test_reasoning_structured_list_not_false_positive():
+    """Reasoning content with structured lists (e.g. 'book name, genre, platform')
+    must NOT trigger Layer B clause-similarity detection.
+
+    This is the exact bug scenario: mimo-v2.5-pro reasoning about what to ask
+    the user produces natural list-like patterns that were falsely detected as
+    loops before the reasoning/content split fix.
+    """
+    cfg = LoopDetectorConfig(
+        min_content_length=50,
+        check_interval_chars=10,
+        max_ngram_repeats=4,
+        max_clause_repeats=4,
+    )
+
+    # Simulate mimo-v2.5-pro reasoning with structured lists.
+    # Carefully avoid n-gram repetition (Layer A) to isolate the Layer B test.
+    reasoning_parts = [
+        "The user wants to create a new novel that captures the essence and style of a popular classical novel. ",
+        "They emphasize capturing the spirit, not copying surface-level elements. ",
+        "Let me follow the workflow for creating a new novel. ",
+        "First, I should ask for: book name, genre, one-sentence concept, platform. ",
+        "The user has already provided a detailed creative brief, ",
+        "but they have not specified the book name yet. ",
+        "I should gather additional information before proceeding further. ",
+        "Let me prepare a comprehensive list of questions for them. ",
+    ]
+    reasoning_text = "".join(reasoning_parts)
+    chunks = [reasoning_text[i : i + 10] for i in range(0, len(reasoning_text), 10)]
+
+    model = FakeReasoningContentStreamingModel(reasoning_chunks=chunks)
+    wrap_model_with_loop_guard(model, cfg)
+
+    collected = list(model._stream([]))
+    # All chunks should pass through — no loop detection on structured reasoning
+    assert len(collected) == len(chunks)
+    for chunk in collected:
+        assert not (chunk.message.response_metadata or {}).get(LoopDetectedNotice.KEY)
+
+
+def test_content_clause_detection_still_works():
+    """Content (non-reasoning) text must still trigger Layer B clause detection.
+
+    Verifies that the content/reasoning split doesn't break normal content
+    loop detection."""
+    cfg = LoopDetectorConfig(
+        min_content_length=80,
+        check_interval_chars=10,
+        max_ngram_repeats=20,  # weaken Layer A so we exercise Layer B
+        max_clause_repeats=4,
+    )
+    prefix = "让我帮你算一算未来几天的安排。"
+    body = (
+        "今天是周一，"
+        "明天是周二，"
+        "三天后是周三，"
+        "四天后是周四，"
+        "五天后是周五，"
+        "六天后是周六，"
+        "七天后是周日，"
+        "八天后又是周一，"
+    )
+    text = prefix + body * 3
+    chunks = [text[i : i + 8] for i in range(0, len(text), 8)]
+
+    model = FakeStreamingChatModel(chunks=chunks)
+    wrap_model_with_loop_guard(model, cfg)
+
+    collected = list(model._stream([]))
+    last_meta = collected[-1].message.response_metadata or {}
+    assert last_meta.get(LoopDetectedNotice.KEY), "content clause detection broken"

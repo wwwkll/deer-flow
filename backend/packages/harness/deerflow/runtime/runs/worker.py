@@ -23,6 +23,7 @@ from typing import Any, Literal
 
 from deerflow.runtime.serialization import serialize
 from deerflow.runtime.stream_bridge import StreamBridge
+from deerflow.runtime.cancel_registry import clear_cancel
 
 from .manager import RunManager, RunRecord
 from .schemas import RunStatus
@@ -238,6 +239,7 @@ async def run_agent(
     finally:
         await bridge.publish_end(run_id)
         asyncio.create_task(bridge.cleanup(run_id, delay=60))
+        clear_cancel(thread_id)
 
 
 # ---------------------------------------------------------------------------

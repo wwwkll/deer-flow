@@ -427,6 +427,25 @@ class SQLiteGlobalVariablesDB(GlobalVariablesDB):
             logger.error("Failed to delete variable by key across threads: %s", e)
             return 0
 
+    def delete_all_by_thread(self, thread_id: str) -> int:
+        """Delete all variables for a specific thread."""
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute(
+                    """
+                    DELETE FROM global_variables
+                    WHERE thread_id = ?
+                """,
+                    (thread_id,),
+                )
+                deleted = cursor.rowcount
+                conn.commit()
+                return deleted
+        except Exception as e:
+            logger.error("Failed to delete variables for thread %s: %s", thread_id, e)
+            return 0
+
     def close(self) -> None:
         """Close database connection."""
         if hasattr(self._local, "conn") and self._local.conn:

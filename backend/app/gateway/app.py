@@ -12,6 +12,7 @@ from app.gateway.routers import (
     agents,
     artifacts,
     assistants_compat,
+    categories,
     channels,
     filesystem,
     global_variables,
@@ -257,6 +258,9 @@ This gateway provides custom endpoints for models, MCP configuration, skills, an
 
     # Agent Favorites API is mounted at /api/agent-favorites
     app.include_router(agent_favorites.router)
+
+    # Categories API is mounted at /api/categories
+    app.include_router(categories.router)
 
     @app.get("/health", tags=["health"])
     async def health_check() -> dict:

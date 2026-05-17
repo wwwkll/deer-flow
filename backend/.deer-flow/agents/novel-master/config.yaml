@@ -10,6 +10,7 @@ tools:
   - master_writer
   - card_validator
   - card_updater
+  - word_counter
   - workflow
   - task
 subagent_enabled: true

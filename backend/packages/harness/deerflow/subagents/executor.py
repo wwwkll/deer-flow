@@ -8,6 +8,8 @@ from concurrent.futures import Future, ThreadPoolExecutor
 from concurrent.futures import TimeoutError as FuturesTimeoutError
 from dataclasses import dataclass, field
 from datetime import datetime
+
+from deerflow.runtime.cancel_registry import request_cancel as _request_run_cancel
 from enum import Enum
 from typing import Any
 
@@ -323,6 +325,9 @@ class SubagentExecutor:
             # Pre-check: bail out immediately if already cancelled before streaming starts
             if result.cancel_event.is_set():
                 logger.info(f"[trace={self.trace_id}] Subagent {self.config.name} cancelled before streaming")
+                _thread_id = run_config.get("configurable", {}).get("thread_id")
+                if _thread_id:
+                    _request_run_cancel(_thread_id)
                 with _background_tasks_lock:
                     if result.status == SubagentStatus.RUNNING:
                         result.status = SubagentStatus.CANCELLED
@@ -337,6 +342,9 @@ class SubagentExecutor:
                 # interrupted until the next chunk is yielded.
                 if result.cancel_event.is_set():
                     logger.info(f"[trace={self.trace_id}] Subagent {self.config.name} cancelled by parent")
+                    _thread_id = run_config.get("configurable", {}).get("thread_id")
+                    if _thread_id:
+                        _request_run_cancel(_thread_id)
                     with _background_tasks_lock:
                         if result.status == SubagentStatus.RUNNING:
                             result.status = SubagentStatus.CANCELLED

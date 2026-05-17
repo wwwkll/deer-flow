@@ -9,5 +9,6 @@ tools:
   - grep
   - write_file
   - str_replace
+  - word_counter
 subagent_enabled: false
 max_concurrent_subagents: 0

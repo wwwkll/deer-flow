@@ -11,6 +11,11 @@ produce the same content forever:
 
       今天是周一，明天是周二，三天后是周三，四天后是周四，五天后是周五……
 
+  Type C — large block / paragraph repetition::
+
+      整段文字（数百到数千字符）被完整重复输出多次。
+      例如 LLM 在 write_file 的 content 参数中把同一个场景重复写 10+ 遍。
+
 This module provides ``StreamLoopDetector`` that accumulates streamed text
 chunks and reports the first moment a loop is detected.
 
@@ -18,7 +23,7 @@ Algorithm
 =========
 
 The detector keeps a rolling **tail** buffer of the most recent
-``max_tail_chars`` characters and runs two complementary checks each time the
+``max_tail_chars`` characters and runs three complementary checks each time the
 amount of new text since the previous check exceeds ``check_interval_chars``:
 
 Layer A — Suffix n-gram repetition (catches *Type A*)
@@ -35,7 +40,14 @@ Layer B — Clause skeleton repetition (catches *Type B*)
     ``clause_similarity_threshold``.  When that count reaches
     ``max_clause_repeats``, declare a loop.
 
-Both checks honour a ``min_content_length`` warm-up threshold to avoid false
+Layer C — Paragraph fingerprint repetition (catches *Type C*)
+    Split the tail buffer by paragraph boundaries (blank lines, ``……``,
+    etc.) into paragraphs.  For each paragraph compute a fingerprint:
+    exact-match via MD5 and fuzzy-match via character-set Dice similarity.
+    When the same fingerprint appears ``max_paragraph_repeats`` times in the
+    last ``paragraph_window`` paragraphs, declare a loop.
+
+All checks honour a ``min_content_length`` warm-up threshold to avoid false
 positives on short prefixes such as ``"# Heading\n\n"`` or ``"OK."``.
 
 The detector is intentionally O(tail_size * ngram_count) per check.  Since
@@ -45,9 +57,10 @@ is small relative to LLM-side latency.
 
 from __future__ import annotations
 
+import hashlib
 import logging
 import re
-from collections import deque
+from collections import Counter, deque
 from dataclasses import dataclass, field
 from typing import Iterable
 
@@ -71,7 +84,7 @@ class LoopDetectionResult:
         detected: True if a loop was detected.
         reason: Human-readable explanation, e.g.
             ``"exact n-gram '好的' repeated 8 times in tail"``.
-        layer: ``"ngram"`` or ``"clause"`` — which detector fired.
+        layer: ``"ngram"``, ``"clause"``, or ``"paragraph"`` — which detector fired.
         pattern: The repeating fragment (for logging / user-facing messages).
         repeat_count: How many repetitions were observed.
     """
@@ -96,46 +109,108 @@ class LoopDetectorConfig:
     enabled: bool = True
 
     # Buffer sizing
-    max_tail_chars: int = 2000
-    """Sliding window of characters kept for analysis."""
+    max_tail_chars: int = 8000
+    """Sliding window of characters kept for analysis.
+    8000 chars ≈ 5000 tokens — large enough to hold 50 repetitions of a
+    160-char loop cycle, ensuring we never miss a true infinite loop."""
 
-    check_interval_chars: int = 60
-    """Run detection every N newly-appended characters.  Smaller = more CPU
-    but earlier detection; larger = cheaper but later detection."""
+    check_interval_chars: int = 200
+    """Run detection every N newly-appended characters.  200 is a balanced
+    trade-off — frequent enough for early detection, cheap enough on CPU."""
 
-    min_content_length: int = 200
+    min_content_length: int = 2000
     """Don't even run detection until at least this much text has been
-    streamed.  Prevents false positives on tiny replies like ``"OK"``."""
+    streamed.  Prevents false positives on short/medium replies.
+    2000 chars ≈ 1300 tokens — we allow substantial output before checking."""
 
     # Layer A — exact n-gram suffix repetition
-    ngram_sizes: tuple[int, ...] = (6, 12, 24, 48)
-    """Suffix lengths to check.  Each tries to detect a different loop
-    period: 6 for "好的好的"-style tight loops, 48 for paragraph-length
-    repetition."""
+    ngram_sizes: tuple[int, ...] = (12, 24, 48)
+    """Suffix lengths to check.  ``n=6`` is intentionally excluded — short
+    n-grams like ``shared``, ``global``, ``hapter`` repeat frequently in
+    normal prose / paths and cause false positives.  ``n=12`` is the
+    shortest length that reliably distinguishes a loop from a repeated word."""
 
-    max_ngram_repeats: int = 30
+    max_ngram_repeats: int = 50
     """Number of times the suffix n-gram must repeat in the tail before
-    flagging a loop."""
+    flagging a loop.  50 is very permissive — a true infinite loop will
+    hit this quickly, while normal prose with repeated phrases won't."""
 
     # Layer B — clause-skeleton repetition (templated variation)
-    clause_window: int = 32
+    clause_window: int = 48
     """How many recent clauses to inspect.  Must be large enough to span
     multiple rotation cycles of a multi-block template loop (e.g. a
     4-step reasoning cycle needs window >> 4 * clauses_per_step)."""
 
-    max_clause_repeats: int = 4
+    max_clause_repeats: int = 6
     """How many clauses in the window must be similar to the most recent
     one before flagging."""
 
-    clause_similarity_threshold: float = 0.5
-    """Dice coefficient threshold on character bigrams for two clauses to be
-    considered structurally similar."""
+    clause_similarity_threshold: float = 0.6
+    """Dice coefficient threshold for two clauses to be considered
+    structurally similar.  0.6 is stricter than 0.5, reducing false
+    positives on naturally similar sentences."""
 
     clause_min_length: int = 3
     """Ignore clauses shorter than this (no signal in 1-2 char fragments)."""
 
     clause_max_length: int = 80
     """Ignore very long clauses (likely real prose, not templated)."""
+
+    layer_a_only: bool = False
+    """When True, only Layer A (n-gram suffix repetition) runs.
+
+    Used for reasoning / thinking content where Layer B's clause-skeleton
+    similarity produces too many false positives on normal structured
+    reasoning (lists, confirmation steps, etc.).  Layer A still catches
+    true repetition loops like "好的好的好的" in thinking streams.
+
+    Note: Layer C (paragraph fingerprint) still runs even when
+    ``layer_a_only`` is True, because large-block repetition is just as
+    pathological in reasoning/thinking as in normal content.
+    """
+
+    # Layer C — paragraph fingerprint repetition (large-block loops)
+    paragraph_min_length: int = 100
+    """Minimum character length for a paragraph to be considered for
+    fingerprinting.  Paragraphs shorter than this are ignored — they
+    don't carry enough signal and cause false positives on short
+    transitional lines like "……" or "好的，我来写"."""
+
+    paragraph_window: int = 30
+    """How many recent paragraphs to inspect for repetition.
+    30 is large enough to span several repetitions of a multi-paragraph
+    block (e.g. a 3-paragraph scene repeated 10 times = 30 paragraphs)."""
+
+    max_paragraph_repeats: int = 3
+    """How many times the same paragraph fingerprint must appear in the
+    window before flagging a loop.  3 is aggressive but appropriate —
+    in normal prose the same paragraph almost never appears verbatim 3+
+    times.  For fuzzy matching, this also applies."""
+
+    paragraph_similarity_threshold: float = 0.7
+    """Dice coefficient threshold for two paragraphs to be considered
+    structurally similar (fuzzy match).  0.7 is stricter than Layer B's
+    0.6 because paragraphs carry more unique structure than clauses.
+    Only used when the exact MD5 match fails."""
+
+    paragraph_fuzzy_check: bool = True
+    """When True, after checking for exact MD5 matches, also check for
+    fuzzy similarity between paragraphs using character-set Dice.
+    This catches near-duplicate paragraphs where the LLM makes minor
+    edits (e.g. changing one word) while still being in a loop."""
+
+    paragraph_tail_chars: int = 32000
+    """Separate (larger) sliding window for Layer C paragraph analysis.
+
+    Layer A/B use ``max_tail_chars`` (default 8000) which is too small
+    for paragraph-level detection — a single novel paragraph can be
+    500–1000 chars, and we need enough room for ``paragraph_window``
+    (default 30) paragraphs.  32000 chars comfortably holds 30+ paragraphs
+    of 1000 chars each.
+
+    This buffer is maintained independently from the Layer A/B tail so
+    that increasing it does not slow down the n-gram scan (which is
+    O(tail_size * ngram_count))."""
 
     def normalized_ngram_sizes(self) -> tuple[int, ...]:
         sizes = tuple(sorted({n for n in self.ngram_sizes if n >= 2}))
@@ -161,6 +236,7 @@ class StreamLoopDetector:
     def __init__(self, config: LoopDetectorConfig | None = None) -> None:
         self.config = config or LoopDetectorConfig()
         self._tail: deque[str] = deque(maxlen=self.config.max_tail_chars)
+        self._paragraph_tail: deque[str] = deque(maxlen=self.config.paragraph_tail_chars)
         self._total_chars: int = 0
         self._chars_since_check: int = 0
         # Cached so we don't re-sort on every feed
@@ -186,6 +262,7 @@ class StreamLoopDetector:
             return LoopDetectionResult()
 
         self._tail.extend(chunk)
+        self._paragraph_tail.extend(chunk)
         self._total_chars += len(chunk)
         self._chars_since_check += len(chunk)
 
@@ -212,7 +289,15 @@ class StreamLoopDetector:
             return result
 
         # Layer B — clause skeleton repetition
-        result = self._check_clause_repetition(tail)
+        if not self.config.layer_a_only:
+            result = self._check_clause_repetition(tail)
+            if result.detected:
+                return result
+
+        # Layer C — paragraph fingerprint repetition (always runs,
+        # even when layer_a_only is True, because large-block repetition
+        # is pathological in all output types)
+        result = self._check_paragraph_repetition(tail)
         if result.detected:
             return result
 
@@ -242,6 +327,10 @@ class StreamLoopDetector:
             suffix = tail[-n:]
             # Skip suffixes that are pure whitespace — those are not loops.
             if not suffix.strip():
+                continue
+            # Skip suffixes where whitespace makes up more than 50% — mixed
+            # whitespace/non-whitespace patterns like '\n    * ' are not loops.
+            if sum(1 for c in suffix if c.isspace()) > len(suffix) / 2:
                 continue
             # Skip degenerate suffixes built from a single character: they
             # collapse to "aaaa..." and would always over-count.  The smaller
@@ -348,10 +437,124 @@ class StreamLoopDetector:
             )
         return LoopDetectionResult()
 
+    # ------------------------------------------------------------------
+    # Layer C — paragraph fingerprint repetition
+    # ------------------------------------------------------------------
+
+    def _check_paragraph_repetition(self, _tail_unused: str) -> LoopDetectionResult:
+        """Detect large-block / paragraph-level repetition.
+
+        This catches the case where an LLM outputs the same paragraph
+        (or near-duplicate paragraph) multiple times.  Each "paragraph"
+        is typically hundreds to thousands of characters — far larger
+        than the clauses inspected by Layer B.
+
+        Uses the separate ``_paragraph_tail`` buffer (default 32 000 chars)
+        instead of the Layer A/B tail (default 8 000 chars) so that enough
+        paragraphs fit in the window for reliable detection.
+
+        Two matching strategies are used:
+
+        1. **Exact match** — MD5 fingerprint of the normalized paragraph
+           text.  Catches verbatim repetition.
+
+        2. **Fuzzy match** (optional) — character-set Dice similarity
+           between paragraphs.  Catches near-duplicates where the LLM
+           makes minor edits (e.g. changing one word per repetition).
+
+        When the same fingerprint (exact or fuzzy) appears
+        ``max_paragraph_repeats`` times in the last ``paragraph_window``
+        paragraphs, a loop is declared.
+        """
+        paragraph_text = "".join(self._paragraph_tail)
+        if not paragraph_text:
+            return LoopDetectionResult()
+
+        paragraphs = _split_paragraphs(
+            paragraph_text,
+            min_length=self.config.paragraph_min_length,
+        )
+        if len(paragraphs) < self.config.max_paragraph_repeats:
+            return LoopDetectionResult()
+
+        window = paragraphs[-self.config.paragraph_window:]
+        if len(window) < self.config.max_paragraph_repeats:
+            return LoopDetectionResult()
+
+        # --- Exact match check ---
+        fingerprints = [_paragraph_fingerprint(p) for p in window]
+        latest_fp = fingerprints[-1]
+        exact_count = sum(1 for fp in fingerprints if fp == latest_fp)
+        if exact_count >= self.config.max_paragraph_repeats:
+            preview = _shorten_for_log(window[-1])
+            return LoopDetectionResult(
+                detected=True,
+                reason=f"paragraph fingerprint {latest_fp[:8]} repeated {exact_count} times in last {len(window)} paragraphs (exact match)",
+                layer="paragraph",
+                pattern=preview,
+                repeat_count=exact_count,
+            )
+
+        # --- Fuzzy match check ---
+        if self.config.paragraph_fuzzy_check:
+            latest_chars = frozenset(window[-1])
+            if len(latest_chars) >= 10:
+                threshold = self.config.paragraph_similarity_threshold
+                fuzzy_count = 1
+                for prev in window[:-1]:
+                    prev_chars = frozenset(prev)
+                    if len(prev_chars) < 10:
+                        continue
+                    sim = _dice(latest_chars, prev_chars)
+                    if sim >= threshold:
+                        fuzzy_count += 1
+                if fuzzy_count >= self.config.max_paragraph_repeats:
+                    preview = _shorten_for_log(window[-1])
+                    return LoopDetectionResult(
+                        detected=True,
+                        reason=f"paragraph repeated {fuzzy_count} times in last {len(window)} paragraphs (fuzzy Dice ≥ {threshold})",
+                        layer="paragraph",
+                        pattern=preview,
+                        repeat_count=fuzzy_count,
+                    )
+
+        return LoopDetectionResult()
+
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
+_PARAGRAPH_SPLIT_RE = re.compile(
+    r"(?:\n\s*\n|"           # blank line
+    r"\u2026\u2026|"         # ……
+    r"\u2014\u2014|"         # ——
+    r"\*\*\*)"               # ***
+)
+
+
+def _split_paragraphs(text: str, min_length: int = 100) -> list[str]:
+    """Split *text* into paragraphs and return those ≥ *min_length*.
+
+    Paragraph boundaries are: blank lines, "……", "——", and "***".
+    These are common narrative separators in Chinese fiction and
+    structured text.  Short fragments (< *min_length*) are discarded
+    because they are typically transitional lines ("好的", "……") that
+    don't carry enough signal for fingerprinting.
+    """
+    parts = _PARAGRAPH_SPLIT_RE.split(text)
+    return [p.strip() for p in parts if len(p.strip()) >= min_length]
+
+
+def _paragraph_fingerprint(text: str) -> str:
+    """Return an MD5 hex digest of *text* for exact paragraph matching.
+
+    The text is stripped of leading/trailing whitespace and normalised
+    to a single-space form before hashing to avoid trivial mismatches
+    due to whitespace differences.
+    """
+    normalised = re.sub(r"\s+", " ", text.strip())
+    return hashlib.md5(normalised.encode("utf-8")).hexdigest()
 
 
 def _split_clauses(text: str, *, min_length: int, max_length: int) -> list[str]:

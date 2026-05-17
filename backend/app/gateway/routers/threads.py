@@ -17,11 +17,13 @@ import time
 import uuid
 from typing import Any
 
+import httpx
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field
 
 from app.gateway.deps import get_checkpointer, get_store
 from deerflow.config.paths import Paths, get_paths
+from deerflow.global_variables.storage import get_storage
 from deerflow.runtime import serialize_channel_values
 
 # ---------------------------------------------------------------------------
@@ -241,7 +243,63 @@ async def delete_thread_data(thread_id: str, request: Request) -> ThreadDeleteRe
         except Exception:
             logger.debug("Could not delete checkpoints for thread %s (not critical)", thread_id)
 
+    # Remove global variables for this thread (best-effort)
+    try:
+        deleted_count = get_storage().delete_all_by_thread(thread_id)
+        if deleted_count > 0:
+            logger.info("Deleted %d global variables for thread %s", deleted_count, thread_id)
+    except Exception:
+        logger.debug("Could not delete global variables for thread %s (not critical)", thread_id)
+
     return response
+
+
+@router.get("/running-status")
+async def get_running_status(request: Request) -> dict:
+    """Return thread_ids that currently have pending or running runs.
+
+    Queries the LangGraph Server for each thread's latest run status.
+    The thread-level ``status`` field ("busy"/"idle") is NOT reliable
+    for detecting active runs, so we check the actual run records.
+    """
+    import asyncio
+
+    langgraph_url = "http://127.0.0.1:2024"
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            search_resp = await client.post(
+                f"{langgraph_url}/threads/search",
+                json={"limit": 100},
+            )
+            search_resp.raise_for_status()
+            threads = search_resp.json()
+    except Exception:
+        logger.warning("Failed to search threads from LangGraph Server", exc_info=True)
+        return {"running_thread_ids": []}
+
+    async def _check_thread(client: httpx.AsyncClient, thread_id: str) -> str | None:
+        try:
+            runs_resp = await client.get(
+                f"{langgraph_url}/threads/{thread_id}/runs",
+                params={"limit": 1},
+            )
+            runs_resp.raise_for_status()
+            runs_data = runs_resp.json()
+            runs = runs_data if isinstance(runs_data, list) else runs_data.get("value", [])
+            for run in runs:
+                if run.get("status") in ("pending", "running"):
+                    return thread_id
+        except Exception:
+            logger.debug("Failed to query runs for thread %s", thread_id, exc_info=True)
+        return None
+
+    async with httpx.AsyncClient(timeout=10.0) as client:
+        results = await asyncio.gather(
+            *(_check_thread(client, t["thread_id"]) for t in threads if t.get("thread_id"))
+        )
+
+    running_ids = [rid for rid in results if rid is not None]
+    return {"running_thread_ids": running_ids}
 
 
 @router.post("", response_model=ThreadResponse)

@@ -45,58 +45,63 @@ class LoopGuardConfig(BaseModel):
     )
 
     max_tail_chars: int = Field(
-        default=2000,
+        default=8000,
         ge=200,
         le=20000,
         description=(
             "Rolling window of recent characters analyzed by the detector. "
-            "Larger windows catch slower loops but cost more CPU per check."
+            "8000 chars ≈ 5000 tokens — large enough to hold 50 repetitions "
+            "of a 160-char loop cycle, ensuring we never miss a true loop."
         ),
     )
     check_interval_chars: int = Field(
-        default=60,
+        default=200,
         ge=10,
         le=1000,
         description=(
-            "Run detection every N newly-streamed characters.  Lower values "
-            "detect loops earlier at the cost of more CPU."
+            "Run detection every N newly-streamed characters.  200 is a "
+            "balanced trade-off — frequent enough for early detection, "
+            "cheap enough on CPU."
         ),
     )
     min_content_length: int = Field(
-        default=200,
+        default=2000,
         ge=20,
         le=10000,
         description=(
             "Skip detection until at least this many characters have been "
-            "streamed.  Prevents false positives on tiny replies."
+            "streamed.  2000 ≈ 1300 tokens — allows substantial output before "
+            "checking, prioritizing zero false positives."
         ),
     )
 
     ngram_sizes: list[int] = Field(
-        default_factory=lambda: [6, 12, 24, 48],
+        default_factory=lambda: [12, 24, 48],
         description=(
-            "Suffix lengths inspected by Layer A.  Each value catches a "
-            "different loop period.  Sizes must be >= 2."
+            "Suffix lengths inspected by Layer A.  n=6 is excluded because "
+            "short n-grams like 'shared', 'global' repeat frequently in normal "
+            "prose/paths and cause false positives.  Sizes must be >= 2."
         ),
     )
     max_ngram_repeats: int = Field(
-        default=30,
+        default=50,
         ge=2,
-        le=100,
+        le=200,
         description=(
             "Number of times an exact suffix must repeat in the tail window "
-            "before Layer A flags a loop."
+            "before Layer A flags a loop.  50 is very permissive — true "
+            "infinite loops hit this quickly, normal prose won't."
         ),
     )
 
     clause_window: int = Field(
-        default=32,
+        default=48,
         ge=3,
-        le=64,
+        le=128,
         description="How many recent clauses Layer B inspects.  Larger windows catch multi-block rotation loops.",
     )
     max_clause_repeats: int = Field(
-        default=4,
+        default=6,
         ge=2,
         le=50,
         description=(
@@ -105,12 +110,13 @@ class LoopGuardConfig(BaseModel):
         ),
     )
     clause_similarity_threshold: float = Field(
-        default=0.5,
+        default=0.6,
         ge=0.1,
         le=1.0,
         description=(
             "Sørensen–Dice coefficient on character bigrams above which "
-            "two clauses are considered structurally similar."
+            "two clauses are considered structurally similar.  0.6 is stricter "
+            "than 0.5, reducing false positives on naturally similar sentences."
         ),
     )
     clause_min_length: int = Field(

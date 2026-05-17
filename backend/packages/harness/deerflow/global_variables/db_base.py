@@ -44,5 +44,9 @@ class GlobalVariablesDB(ABC):
         """Delete a variable by key across all threads. Returns number of deleted rows."""
 
     @abstractmethod
+    def delete_all_by_thread(self, thread_id: str) -> int:
+        """Delete all variables for a specific thread. Returns number of deleted rows."""
+
+    @abstractmethod
     def close(self) -> None:
         """Close database connection."""
